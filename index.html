@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>热区余烬 | 末日搜打撤</title>
     <meta name="description" content="热区余烬：格子制末日搜打撤生存游戏" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=desktop-ops-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -44,17 +44,6 @@
           <button class="action-button" data-action="use-sedative"><span class="action-glyph">◆</span><span>用镇静针</span><small>即时</small></button>
           <button class="action-button" data-action="use-coagulant"><span class="action-glyph">✚</span><span>用凝血针</span><small>即时</small></button>
           <button class="action-button safe-only" data-action="activate"><span class="action-glyph">⚡</span><span>开辟安全点</span><small>3回合</small></button>
-          <button class="action-button safe-only" data-action="craft-water"><span class="action-glyph">◌</span><span>制作净水</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-bandage"><span class="action-glyph">＋</span><span>制作绷带</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-decoder"><span class="action-glyph">⌘</span><span>制作解码器</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-ammo"><span class="action-glyph">▪</span><span>制作弹药</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-backpack"><span class="action-glyph">▣</span><span>制作背包</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-armor"><span class="action-glyph">⬟</span><span>制作防具</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-weapon"><span class="action-glyph">⚒</span><span>制作武器</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-suppressor"><span class="action-glyph">≋</span><span>制作枪口抑制器</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-adrenaline"><span class="action-glyph">▲</span><span>制作肾上腺素</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-sedative"><span class="action-glyph">◆</span><span>制作镇静针</span><small>工作台</small></button>
-          <button class="action-button safe-only" data-action="craft-coagulant"><span class="action-glyph">✚</span><span>制作凝血针</span><small>工作台</small></button>
           <button class="action-button safe-only" data-action="repair"><span class="action-glyph">⟳</span><span>修复热屏障</span><small>安全点</small></button>
           <button class="action-button safe-only" data-action="rest"><span class="action-glyph">↻</span><span>睡觉到下一天</span><small>推进天数</small></button>
           <button class="action-button safe-only" data-action="terminal"><span class="action-glyph">▣</span><span>启动终端</span><small>研究区</small></button>
@@ -77,29 +66,37 @@
           <div class="meter-row"><span>安全点电力</span><div class="meter"><i id="safe-power-meter"></i></div><b id="safe-power-value">100%</b></div>
         </section>
 
-        <section class="mission-panel">
-          <div class="panel-heading"><span>主线目标</span><span class="mission-step" id="mission-step">0 / 3</span></div>
-          <p id="mission-text">修复三个热灭活节点，取得耐热株核心样本。</p>
-          <div class="objective-list">
-            <div class="objective" id="objective-safe"><span class="objective-mark"></span><span>开辟3个前线安全点</span></div>
-            <div class="objective" id="objective-sample"><span class="objective-mark"></span><span>取得耐热株核心样本</span></div>
-            <div class="objective" id="objective-terminal"><span class="objective-mark"></span><span>启动区域热灭活终端</span></div>
-          </div>
-        </section>
+        <div class="sidebar-tabs" role="tablist" aria-label="生存管理">
+          <button class="sidebar-tab active" id="tab-inventory" role="tab" aria-selected="true" aria-controls="panel-inventory" data-sidebar-tab="inventory">物资</button>
+          <button class="sidebar-tab" id="tab-craft" role="tab" aria-selected="false" aria-controls="panel-craft" data-sidebar-tab="craft">工作台</button>
+          <button class="sidebar-tab" id="tab-mission" role="tab" aria-selected="false" aria-controls="panel-mission" data-sidebar-tab="mission">目标</button>
+        </div>
 
-        <section class="inventory-panel">
-          <div class="panel-heading"><span>携带物资</span><span id="inventory-count">0 / 12格</span></div>
-          <div class="equipment-grid" id="equipment-grid" aria-label="已装备"></div>
-          <div class="inventory-grid" id="inventory-grid"></div>
-          <div class="stash-line"><span id="stash-name">当前安全点仓库</span><strong id="stash-summary">空</strong></div>
-          <div class="stash-grid" id="stash-grid" aria-label="安全点仓库物资"></div>
-        </section>
+        <div class="sidebar-content">
+          <section class="inventory-panel sidebar-panel" id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" data-sidebar-panel="inventory">
+            <div class="panel-heading"><span>携带物资</span><span id="inventory-count">0 / 12格</span></div>
+            <div class="equipment-grid" id="equipment-grid" aria-label="已装备"></div>
+            <div class="inventory-grid" id="inventory-grid"></div>
+            <div class="stash-line"><span id="stash-name">当前安全点仓库</span><strong id="stash-summary">空</strong></div>
+            <div class="stash-grid" id="stash-grid" aria-label="安全点仓库物资"></div>
+          </section>
 
-        <section class="craft-panel">
-          <div class="panel-heading"><span>安全点工作台</span><span id="workbench-status">需回安全点</span></div>
-          <p class="recipe-lock" id="recipe-lock">野外没有稳定电力。这里先查看配方，回到安全点后才可制作。</p>
-          <div class="recipe-list" id="recipe-list"></div>
-        </section>
+          <section class="craft-panel sidebar-panel" id="panel-craft" role="tabpanel" aria-labelledby="tab-craft" data-sidebar-panel="craft" hidden>
+            <div class="panel-heading"><span>安全点工作台</span><span id="workbench-status">需回安全点</span></div>
+            <p class="recipe-lock" id="recipe-lock">野外没有稳定电力。这里先查看配方，回到安全点后才可制作。</p>
+            <div class="recipe-list" id="recipe-list"></div>
+          </section>
+
+          <section class="mission-panel sidebar-panel" id="panel-mission" role="tabpanel" aria-labelledby="tab-mission" data-sidebar-panel="mission" hidden>
+            <div class="panel-heading"><span>主线目标</span><span class="mission-step" id="mission-step">0 / 3</span></div>
+            <p id="mission-text">修复三个热灭活节点，取得耐热株核心样本。</p>
+            <div class="objective-list">
+              <div class="objective" id="objective-safe"><span class="objective-mark"></span><span>开辟3个前线安全点</span></div>
+              <div class="objective" id="objective-sample"><span class="objective-mark"></span><span>取得耐热株核心样本</span></div>
+              <div class="objective" id="objective-terminal"><span class="objective-mark"></span><span>启动区域热灭活终端</span></div>
+            </div>
+          </section>
+        </div>
 
         <section class="log-panel">
           <div class="panel-heading"><span>现场记录</span><button class="text-button" id="clear-log">清空</button></div>

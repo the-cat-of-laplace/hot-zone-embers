@@ -1667,17 +1667,21 @@ function renderRecipes() {
   ui.recipeLock.textContent = inSafe
     ? '工作台已接入安全点微电网；制作会消耗电力并推进多个回合。'
     : '野外没有稳定电力。配方可查看，回到安全点内才可制作。';
-  ui.recipes.innerHTML = Object.values(RECIPES).map((recipe) => {
+  ui.recipes.innerHTML = Object.entries(RECIPES).map(([action, recipe]) => {
     const missing = Object.entries(recipe.ingredients)
       .filter(([item, amount]) => itemCount(currentStash(), item) < amount)
       .map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount - itemCount(currentStash(), item)}`);
+    const canCraft = inSafe && !missing.length && safe.power >= recipe.power;
     const status = !inSafe ? '回安全点制作' : missing.length ? `缺少 ${missing.join('、')}` : safe.power < recipe.power ? '电力不足' : `可以制作 · ${recipe.turns || 2}回合`;
     const output = ITEM_META[recipe.output] || { label: recipe.output };
     return `<article class="recipe-item ${inSafe ? '' : 'locked'}">
-      <div class="recipe-head"><strong>${output.label}×${recipe.amount}</strong><span>${recipe.power} 电力 · ${recipe.turns || 2}回合</span></div>
-      <div class="recipe-line">配方：${recipeIngredientsText(recipe)}</div>
-      <div class="recipe-effect">作用：${recipe.effect}</div>
-      <div class="recipe-state">${status}</div>
+      <div class="recipe-copy">
+        <div class="recipe-head"><strong>${output.label}×${recipe.amount}</strong><span>${recipe.power} 电力 · ${recipe.turns || 2}回合</span></div>
+        <div class="recipe-line">配方：${recipeIngredientsText(recipe)}</div>
+        <div class="recipe-effect">作用：${recipe.effect}</div>
+        <div class="recipe-state">${status}</div>
+      </div>
+      <button class="recipe-button" data-recipe-action="${action}" ${canCraft ? '' : 'disabled'}><span aria-hidden="true">${recipe.glyph}</span>制作</button>
     </article>`;
   }).join('');
 }
@@ -1766,6 +1770,11 @@ function updateButtons() {
 }
 
 document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => performAction(button.dataset.action)));
+ui.recipes.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-recipe-action]');
+  if (!button || button.disabled || state.mode !== 'field') return;
+  performAction(button.dataset.recipeAction);
+});
 ui.inventory.addEventListener('click', (event) => {
   const slot = event.target.closest('[data-inventory-item]');
   if (!slot || state.mode !== 'field') return;
@@ -1786,6 +1795,30 @@ ui.equipment.addEventListener('click', (event) => {
   if (slot.dataset.equipmentAction === 'unequip') unequipItem(slot.dataset.equipmentItem);
 });
 ui.clearLog.addEventListener('click', () => { state.logs = []; updateLog(); });
+
+const sidebarTabs = [...document.querySelectorAll('[data-sidebar-tab]')];
+const sidebarPanels = [...document.querySelectorAll('[data-sidebar-panel]')];
+function selectSidebarPanel(name) {
+  sidebarTabs.forEach((tab) => {
+    const active = tab.dataset.sidebarTab === name;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+  });
+  sidebarPanels.forEach((panel) => { panel.hidden = panel.dataset.sidebarPanel !== name; });
+  document.querySelector('.sidebar-content')?.scrollTo({ top: 0 });
+}
+sidebarTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => selectSidebarPanel(tab.dataset.sidebarTab));
+  tab.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const offset = event.key === 'ArrowRight' ? 1 : -1;
+    const next = sidebarTabs[(index + offset + sidebarTabs.length) % sidebarTabs.length];
+    selectSidebarPanel(next.dataset.sidebarTab);
+    next.focus();
+  });
+});
 ui.restart.addEventListener('click', resetGame);
 window.addEventListener('resize', resizeCanvas);
 window.addEventListener('keydown', (event) => {

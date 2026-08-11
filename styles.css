@@ -140,7 +140,7 @@ h2 { margin-bottom: 10px; font-size: 30px; line-height: 1.05; }
 .action-button small { color: var(--soft); font-size: 9px; white-space: nowrap; }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.status-panel, .mission-panel, .inventory-panel, .log-panel {
+.status-panel, .mission-panel, .inventory-panel, .craft-panel, .log-panel {
   border: 1px solid var(--line);
   background: rgba(17, 25, 24, 0.92);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
@@ -164,6 +164,29 @@ h2 { margin-bottom: 10px; font-size: 30px; line-height: 1.05; }
 .objective-mark { width: 8px; height: 8px; border: 1px solid #687771; border-radius: 50%; flex: 0 0 auto; }
 .objective.done { color: var(--teal); }
 .objective.done .objective-mark { border-color: var(--teal); background: var(--teal); box-shadow: 0 0 0 3px rgba(112, 185, 171, 0.1); }
+
+.sidebar-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  border: 1px solid var(--line);
+  background: #0e1615;
+  padding: 3px;
+}
+.sidebar-tab {
+  min-width: 0;
+  min-height: 31px;
+  border: 0;
+  background: transparent;
+  color: #7f8d88;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sidebar-tab:hover { background: #17211f; color: #c9d2ce; }
+.sidebar-tab.active { background: #20302d; color: var(--warm-2); box-shadow: inset 0 -2px 0 var(--warm); }
+.sidebar-tab:focus-visible { outline: 1px solid var(--teal); outline-offset: -1px; }
+.sidebar-content { min-width: 0; }
+.sidebar-panel { width: 100%; }
 
 .equipment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
 .equipment-slot { min-height: 44px; border: 1px solid #2a3734; background: #111a19; display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: 1fr 1fr; align-items: center; column-gap: 5px; padding: 5px; color: #7d8c86; font: inherit; text-align: left; }
@@ -196,11 +219,12 @@ button.inventory-slot:hover { border-color: #779d91; background: #172321; }
 .stash-slot small { max-width: 100%; overflow: hidden; color: #8fa099; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .stash-empty { min-height: 32px; display: grid; place-items: center; color: #66746f; font-size: 9px; }
 
-.craft-panel { border: 1px solid var(--line); background: rgba(17, 25, 24, 0.92); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15); padding: 13px; }
 .recipe-lock { margin: -4px 0 10px; color: var(--soft); font-size: 10px; line-height: 1.45; }
-.recipe-list { display: grid; gap: 7px; max-height: 410px; overflow: auto; padding-right: 3px; }
-.recipe-item { border: 1px solid #2a3734; background: #131d1b; padding: 8px 9px; }
+.recipe-list { display: grid; max-height: 410px; overflow: auto; padding-right: 3px; }
+.recipe-item { display: grid; grid-template-columns: minmax(0, 1fr) 58px; gap: 9px; align-items: center; border-bottom: 1px solid #293532; padding: 9px 1px; }
+.recipe-item:last-child { border-bottom: 0; }
 .recipe-item.locked { opacity: .78; }
+.recipe-copy { min-width: 0; }
 .recipe-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .recipe-head strong { color: #d8e1db; font-size: 11px; font-weight: 600; }
 .recipe-head span { color: var(--warm-2); font-size: 9px; white-space: nowrap; }
@@ -208,8 +232,13 @@ button.inventory-slot:hover { border-color: #779d91; background: #172321; }
 .recipe-effect { color: #b4c0b9; margin-top: 2px; }
 .recipe-state { margin-top: 5px; color: var(--teal); font-size: 9px; }
 .recipe-item.locked .recipe-state { color: #7f8b86; }
+.recipe-button { min-height: 32px; border: 1px solid #4b675f; background: #1b2b27; color: #c8d8d2; padding: 5px 6px; font-size: 10px; cursor: pointer; }
+.recipe-button span { display: block; margin-bottom: 2px; color: var(--warm-2); font-size: 14px; line-height: 1; }
+.recipe-button:hover:not(:disabled) { border-color: var(--teal); background: #243a34; }
+.recipe-button:disabled { border-color: #2a3532; background: #121a19; color: #56625e; cursor: not-allowed; }
+.recipe-button:disabled span { color: #53605b; }
 
-.log-panel { min-height: 166px; flex: 1; display: flex; flex-direction: column; }
+.log-panel { min-height: 166px; display: flex; flex-direction: column; }
 .text-button { border: 0; background: transparent; color: var(--soft); padding: 0; font-size: 10px; cursor: pointer; }
 .text-button:hover { color: var(--warm-2); }
 .event-log { display: flex; flex-direction: column; gap: 7px; overflow: auto; max-height: 195px; padding-right: 4px; }
@@ -240,9 +269,8 @@ button.inventory-slot:hover { border-color: #779d91; background: #172321; }
 
 @media (max-width: 800px) {
   .app-shell { display: block; padding: 10px; }
-  .sidebar { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .sidebar { margin-top: 12px; display: flex; }
   .log-panel { min-height: 215px; }
-  .sidebar-footer { grid-column: 1 / -1; }
   .canvas-frame { height: 62vh; min-height: 410px; }
 }
 
@@ -257,4 +285,30 @@ button.inventory-slot:hover { border-color: #779d91; background: #172321; }
   .sidebar { display: flex; }
   .status-grid { gap: 8px; }
   .canvas-hint { font-size: 10px; max-width: calc(100% - 26px); }
+}
+
+@media (min-width: 801px) {
+  html, body { height: 100%; overflow: hidden; }
+  .app-shell { height: 100dvh; min-height: 0; overflow: hidden; }
+  .game-column { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .canvas-frame { height: auto; min-height: 0; }
+  .action-strip { max-height: 127px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .sidebar {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) 166px auto;
+    align-content: stretch;
+    overflow: hidden;
+  }
+  .sidebar-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding-right: 3px;
+  }
+  .sidebar-content .recipe-list,
+  .sidebar-content .stash-grid { max-height: none; overflow: visible; }
+  .log-panel { min-height: 0; height: 100%; }
+  .event-log { min-height: 0; max-height: none; flex: 1; }
 }
