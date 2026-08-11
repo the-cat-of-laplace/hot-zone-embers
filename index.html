@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>热区余烬 | 末日搜打撤</title>
+    <meta name="description" content="热区余烬：格子制末日搜打撤生存游戏" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="game-column">
+        <header class="game-header">
+          <div>
+            <p class="eyebrow">HOT ZONE / FIELD OPERATIONS</p>
+            <h1>热区余烬</h1>
+          </div>
+          <div class="header-status">
+            <span id="run-status">第1天 · 白天</span>
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="safe-status">热屏障稳定</span>
+          </div>
+        </header>
+        <div class="canvas-frame" id="canvas-frame">
+          <canvas id="game-canvas" aria-label="末日城市探索场景"></canvas>
+          <div class="canvas-hint" id="canvas-hint">WASD / 方向键移动 · 点击相邻格移动</div>
+          <div class="canvas-tooltip hidden" id="canvas-tooltip" role="status"></div>
+        </div>
+        <div class="action-strip" id="action-strip">
+          <button class="action-button" data-action="inspect"><span class="action-glyph">⌕</span><span>调查</span><small>1回合</small></button>
+          <button class="action-button" data-action="quiet"><span class="action-glyph">♢</span><span>安静等待</span><small>1回合</small></button>
+          <button class="action-button" data-action="recenter" title="将视角回到玩家位置"><span class="action-glyph">◎</span><span>视角回正</span><small>镜头</small></button>
+          <button class="action-button" data-action="hack"><span class="action-glyph">⌘</span><span>正常破解</span><small>2回合</small></button>
+          <button class="action-button danger" data-action="brute"><span class="action-glyph">⚒</span><span>暴力拆解</span><small>1回合</small></button>
+          <button class="action-button combat" data-action="melee"><span class="action-glyph">✦</span><span>近战</span><small>1回合</small></button>
+          <button class="action-button combat" data-action="shoot"><span class="action-glyph">↗</span><span>射击</span><small>1回合</small></button>
+          <button class="action-button" data-action="loot"><span class="action-glyph">↧</span><span>拾取物资</span><small>即时</small></button>
+          <button class="action-button safe-only" data-action="store-selected"><span class="action-glyph">⇣</span><span>存入仓库</span><small>所选物资</small></button>
+          <button class="action-button danger" data-action="discard-selected"><span class="action-glyph">×</span><span>丢弃物资</span><small>所选物资</small></button>
+          <button class="action-button" data-action="drink"><span class="action-glyph">◌</span><span>饮水</span><small>1回合</small></button>
+          <button class="action-button" data-action="eat"><span class="action-glyph">▤</span><span>进食</span><small>1回合</small></button>
+          <button class="action-button" data-action="medkit"><span class="action-glyph">＋</span><span>治疗</span><small>即时</small></button>
+          <button class="action-button" data-action="use-adrenaline"><span class="action-glyph">▲</span><span>用肾上腺素</span><small>即时</small></button>
+          <button class="action-button" data-action="use-sedative"><span class="action-glyph">◆</span><span>用镇静针</span><small>即时</small></button>
+          <button class="action-button" data-action="use-coagulant"><span class="action-glyph">✚</span><span>用凝血针</span><small>即时</small></button>
+          <button class="action-button safe-only" data-action="activate"><span class="action-glyph">⚡</span><span>开辟安全点</span><small>3回合</small></button>
+          <button class="action-button safe-only" data-action="craft-water"><span class="action-glyph">◌</span><span>制作净水</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-bandage"><span class="action-glyph">＋</span><span>制作绷带</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-decoder"><span class="action-glyph">⌘</span><span>制作解码器</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-ammo"><span class="action-glyph">▪</span><span>制作弹药</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-backpack"><span class="action-glyph">▣</span><span>制作背包</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-armor"><span class="action-glyph">⬟</span><span>制作防具</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-weapon"><span class="action-glyph">⚒</span><span>制作武器</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-suppressor"><span class="action-glyph">≋</span><span>制作枪口抑制器</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-adrenaline"><span class="action-glyph">▲</span><span>制作肾上腺素</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-sedative"><span class="action-glyph">◆</span><span>制作镇静针</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="craft-coagulant"><span class="action-glyph">✚</span><span>制作凝血针</span><small>工作台</small></button>
+          <button class="action-button safe-only" data-action="repair"><span class="action-glyph">⟳</span><span>修复热屏障</span><small>安全点</small></button>
+          <button class="action-button safe-only" data-action="rest"><span class="action-glyph">↻</span><span>睡觉到下一天</span><small>推进天数</small></button>
+          <button class="action-button safe-only" data-action="terminal"><span class="action-glyph">▣</span><span>启动终端</span><small>研究区</small></button>
+        </div>
+      </section>
+
+      <aside class="sidebar" aria-label="任务与生存状态">
+        <section class="status-panel">
+          <div class="panel-heading"><span>远征状态</span><span class="pressure-chip" id="pressure-chip">压力 1</span></div>
+          <div class="status-grid">
+            <div><span>回合</span><strong id="turn-value">1 / 64</strong></div>
+            <div><span>天气</span><strong id="weather-value">晴</strong></div>
+            <div><span>当前位置</span><strong id="location-value">初始隔离站</strong></div>
+            <div><span>安全点</span><strong id="safe-count">1 / 6</strong></div>
+          </div>
+          <div class="meter-row"><span>生命</span><div class="meter"><i id="health-meter"></i></div><b id="health-value">100</b></div>
+          <div class="meter-row"><span>口渴</span><div class="meter"><i id="thirst-meter"></i></div><b id="thirst-value">86</b></div>
+          <div class="meter-row"><span>饥饿</span><div class="meter"><i id="hunger-meter"></i></div><b id="hunger-value">90</b></div>
+          <div class="meter-row"><span>负重</span><div class="meter"><i id="weight-meter"></i></div><b id="weight-value">8 / 30kg</b></div>
+          <div class="meter-row"><span>安全点电力</span><div class="meter"><i id="safe-power-meter"></i></div><b id="safe-power-value">100%</b></div>
+        </section>
+
+        <section class="mission-panel">
+          <div class="panel-heading"><span>主线目标</span><span class="mission-step" id="mission-step">0 / 3</span></div>
+          <p id="mission-text">修复三个热灭活节点，取得耐热株核心样本。</p>
+          <div class="objective-list">
+            <div class="objective" id="objective-safe"><span class="objective-mark"></span><span>开辟3个前线安全点</span></div>
+            <div class="objective" id="objective-sample"><span class="objective-mark"></span><span>取得耐热株核心样本</span></div>
+            <div class="objective" id="objective-terminal"><span class="objective-mark"></span><span>启动区域热灭活终端</span></div>
+          </div>
+        </section>
+
+        <section class="inventory-panel">
+          <div class="panel-heading"><span>携带物资</span><span id="inventory-count">0 / 12格</span></div>
+          <div class="equipment-grid" id="equipment-grid" aria-label="已装备"></div>
+          <div class="inventory-grid" id="inventory-grid"></div>
+          <div class="stash-line"><span id="stash-name">当前安全点仓库</span><strong id="stash-summary">空</strong></div>
+          <div class="stash-grid" id="stash-grid" aria-label="安全点仓库物资"></div>
+        </section>
+
+        <section class="craft-panel">
+          <div class="panel-heading"><span>安全点工作台</span><span id="workbench-status">需回安全点</span></div>
+          <p class="recipe-lock" id="recipe-lock">野外没有稳定电力。这里先查看配方，回到安全点后才可制作。</p>
+          <div class="recipe-list" id="recipe-list"></div>
+        </section>
+
+        <section class="log-panel">
+          <div class="panel-heading"><span>现场记录</span><button class="text-button" id="clear-log">清空</button></div>
+          <div class="event-log" id="event-log" aria-live="polite"></div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <span>永久死亡 · 无天数上限</span>
+          <span>点击场景查看详情</span>
+        </footer>
+      </aside>
+    </main>
+
+    <div class="modal-layer hidden" id="end-modal">
+      <div class="end-modal" role="dialog" aria-modal="true" aria-labelledby="end-title">
+        <p class="eyebrow" id="end-eyebrow">RUN ENDED</p>
+        <h2 id="end-title">你倒下了</h2>
+        <p id="end-copy">本局远征已经结束。没有尸包，没有回收，只有下一次出发。</p>
+        <div class="end-stats" id="end-stats"></div>
+        <button class="primary-button" id="restart-button">重新开始</button>
+      </div>
+    </div>
+
+    <script type="module" src="./game.js?v=day-night-contrast"></script>
+  </body>
+</html>
