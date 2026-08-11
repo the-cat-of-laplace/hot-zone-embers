@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>热区余烬 | 末日搜打撤</title>
     <meta name="description" content="热区余烬：格子制末日搜打撤生存游戏" />
-    <link rel="stylesheet" href="./styles.css?v=desktop-ops-v1" />
+    <link rel="stylesheet" href="./styles.css?v=loot-flow-v2" />
   </head>
   <body>
     <main class="app-shell">
@@ -25,6 +25,17 @@
           <canvas id="game-canvas" aria-label="末日城市探索场景"></canvas>
           <div class="canvas-hint" id="canvas-hint">WASD / 方向键移动 · 点击相邻格移动</div>
           <div class="canvas-tooltip hidden" id="canvas-tooltip" role="status"></div>
+          <section class="loot-reveal" id="loot-reveal" aria-live="polite" aria-label="附近物资" hidden>
+            <div class="loot-reveal-heading">
+              <div>
+                <span class="eyebrow">FIELD CACHE</span>
+                <strong id="loot-reveal-title">附近物资</strong>
+              </div>
+              <button class="text-button" id="loot-close" type="button">收起</button>
+            </div>
+            <div class="loot-reveal-status" id="loot-reveal-status"></div>
+            <div class="loot-reveal-items" id="loot-reveal-items"></div>
+          </section>
         </div>
         <div class="action-strip" id="action-strip">
           <button class="action-button" data-action="inspect"><span class="action-glyph">⌕</span><span>调查</span><small>1回合</small></button>
@@ -34,9 +45,8 @@
           <button class="action-button danger" data-action="brute"><span class="action-glyph">⚒</span><span>暴力拆解</span><small>1回合</small></button>
           <button class="action-button combat" data-action="melee"><span class="action-glyph">✦</span><span>近战</span><small>1回合</small></button>
           <button class="action-button combat" data-action="shoot"><span class="action-glyph">↗</span><span>射击</span><small>1回合</small></button>
-          <button class="action-button" data-action="loot"><span class="action-glyph">↧</span><span>拾取物资</span><small>即时</small></button>
-          <button class="action-button safe-only" data-action="store-selected"><span class="action-glyph">⇣</span><span>存入仓库</span><small>所选物资</small></button>
-          <button class="action-button danger" data-action="discard-selected"><span class="action-glyph">×</span><span>丢弃物资</span><small>所选物资</small></button>
+          <button class="action-button safe-only" data-action="store-selected"><span class="action-glyph">⇣</span><span>存入仓库</span><small>所选 · 1件</small></button>
+          <button class="action-button danger" data-action="discard-selected"><span class="action-glyph">×</span><span>丢弃物资</span><small>所选 · 1件</small></button>
           <button class="action-button" data-action="drink"><span class="action-glyph">◌</span><span>饮水</span><small>1回合</small></button>
           <button class="action-button" data-action="eat"><span class="action-glyph">▤</span><span>进食</span><small>1回合</small></button>
           <button class="action-button" data-action="medkit"><span class="action-glyph">＋</span><span>治疗</span><small>即时</small></button>
@@ -120,6 +130,6 @@
       </div>
     </div>
 
-    <script type="module" src="./game.js?v=desktop-ops-v1"></script>
+    <script type="module" src="./game.js?v=loot-flow-v2"></script>
   </body>
 </html>

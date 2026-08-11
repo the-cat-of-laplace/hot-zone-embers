@@ -37,6 +37,11 @@ const ui = {
   sampleObjective: document.querySelector('#objective-sample'),
   terminalObjective: document.querySelector('#objective-terminal'),
   tooltip: document.querySelector('#canvas-tooltip'),
+  lootReveal: document.querySelector('#loot-reveal'),
+  lootTitle: document.querySelector('#loot-reveal-title'),
+  lootStatus: document.querySelector('#loot-reveal-status'),
+  lootItems: document.querySelector('#loot-reveal-items'),
+  lootClose: document.querySelector('#loot-close'),
   modal: document.querySelector('#end-modal'),
   endEyebrow: document.querySelector('#end-eyebrow'),
   endTitle: document.querySelector('#end-title'),
@@ -267,6 +272,9 @@ function resetGame() {
     terminalActivated: false,
     selectedTarget: null,
     selectedInventory: null,
+    lootReveal: null,
+    groundLoot: [],
+    nextGroundLootId: 1,
     activation: null,
     inventory: { water: 2, food: 1, medkit: 1, ammo: 4 },
     equipment: { backpack: null, armor: null, weapon: null, suppressor: null },
@@ -417,6 +425,15 @@ function squareDistance(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.
 function activeSafeAt(point) { return state.safePoints.find((safe) => safe.active && squareDistance(point, safe) <= safe.radius); }
 function candidateSafeAt(point) { return state.safePoints.find((safe) => !safe.active && dist(point, safe) <= 1.5); }
 function containerHasLoot(container) { return Object.values(container.loot || {}).some((amount) => amount > 0); }
+function groundLootAt(x, y) { return state.groundLoot.find((drop) => drop.x === x && drop.y === y && drop.amount > 0); }
+function groundLootById(id) { return state.groundLoot.find((drop) => drop.id === id && drop.amount > 0); }
+function groundLootLabel(drop) { return `${ITEM_META[drop.item]?.label || drop.item}×${drop.amount}`; }
+function dropGroundItem(item, amount = 1, x = state.player.x, y = state.player.y) {
+  if (amount <= 0) return;
+  const existing = state.groundLoot.find((drop) => drop.x === x && drop.y === y && drop.item === item);
+  if (existing) existing.amount += amount;
+  else state.groundLoot.push({ id: state.nextGroundLootId++, x, y, item, amount });
+}
 function nearestContainer() {
   return state.containers
     .filter((container) => (container.status === 'closed' || containerHasLoot(container)) && dist(container, state.player) <= 1.55)
@@ -433,13 +450,23 @@ function selectedContainer() {
   if (state.selectedTarget?.kind !== 'container') return null;
   return state.containers.find((container) => container.id === state.selectedTarget.id && (container.status === 'closed' || containerHasLoot(container))) || null;
 }
+function selectedGroundLoot() {
+  if (state.selectedTarget?.kind !== 'groundLoot') return null;
+  return groundLootById(state.selectedTarget.id) || null;
+}
 function selectTarget(kind, target) {
   state.selectedTarget = target ? { kind, id: target.id } : null;
+  if (kind !== 'container' && kind !== 'groundLoot') state.lootReveal = null;
   if (!target) return;
   if (kind === 'zombie') logEvent(`已选中${zombieLabel(target)}。靠近后可以近战，视野内也可以射击。`, 'warn');
   if (kind === 'container') logEvent(target.status === 'open'
     ? `已选中${target.type}。靠近后可以拾取剩余物资。`
     : `已选中${target.type}。靠近后可以破解或暴力拆解。`);
+  if (kind === 'container' && target.status === 'open') showLootReveal('container', target.id);
+  if (kind === 'groundLoot') {
+    logEvent(`已选中地面物资：${groundLootLabel(target)}。`, 'good');
+    showLootReveal('groundLoot', target.id);
+  }
   updateUI();
 }
 
@@ -509,6 +536,69 @@ function updateLog() {
   ui.log.innerHTML = state.logs.map((entry) => `<div class="event ${entry.tone}"><time>${entry.timestamp}</time>${entry.text}</div>`).join('');
 }
 
+function lootSource(kind, id) {
+  if (kind === 'container') {
+    const container = state.containers.find((item) => item.id === id);
+    return container && container.status === 'open' ? { kind, id, title: container.type, loot: container.loot, point: container } : null;
+  }
+  if (kind === 'groundLoot') {
+    const drop = groundLootById(id);
+    return drop ? { kind, id, title: '地面物资', loot: { [drop.item]: drop.amount }, point: drop, drop } : null;
+  }
+  return null;
+}
+
+function showLootReveal(kind, id, phase = 'ready') {
+  state.lootReveal = { kind, id, phase };
+  renderLootReveal();
+}
+
+function renderLootReveal() {
+  const reveal = state.lootReveal;
+  const source = reveal && lootSource(reveal.kind, reveal.id);
+  if (!ui.lootReveal || !source || state.mode !== 'field' || manhattan(source.point, state.player) > 1 || !Object.values(source.loot).some((amount) => amount > 0)) {
+    if (ui.lootReveal) ui.lootReveal.hidden = true;
+    return;
+  }
+  ui.lootReveal.hidden = false;
+  ui.lootReveal.classList.remove('opening', 'ready');
+  ui.lootReveal.classList.add(reveal.phase === 'opening' ? 'opening' : 'ready');
+  ui.lootTitle.textContent = source.title;
+  ui.lootStatus.textContent = reveal.phase === 'opening' ? '锁扣正在解除，物资暂不可取。' : '点击一件物资，每次只取 1 件。';
+  if (reveal.phase === 'opening') {
+    ui.lootItems.innerHTML = '';
+    return;
+  }
+  ui.lootItems.innerHTML = Object.entries(source.loot).filter(([, amount]) => amount > 0).map(([item, amount]) => {
+    const meta = ITEM_META[item] || { label: item, glyph: '·' };
+    const canTake = canCarryItem(item);
+    return `<button class="loot-item" data-loot-kind="${source.kind}" data-loot-source="${source.id}" data-loot-item="${item}" ${canTake ? '' : 'disabled'} title="拾取${meta.label}×1">
+      <span class="loot-item-icon" aria-hidden="true">${meta.glyph}</span>
+      <span class="loot-item-copy"><strong>${meta.label}</strong><small>剩余 ×${amount} · 单件拾取</small></span>
+      <span class="loot-item-take">＋1</span>
+    </button>`;
+  }).join('');
+}
+
+function lootOne(kind, id, item) {
+  const source = lootSource(kind, id);
+  if (!source || state.mode !== 'field' || state.lootReveal?.phase === 'opening') return;
+  if (manhattan(source.point, state.player) > 1) { logEvent('靠近物资后才能拾取。', 'warn'); return; }
+  if (itemCount(source.loot, item) <= 0) return;
+  if (!canCarryItem(item)) { logEvent('背包格数或负重不足，物资仍留在原处。', 'warn'); return; }
+  addItem(state.inventory, item, 1);
+  if (source.kind === 'container') takeItem(source.loot, item, 1);
+  if (source.kind === 'groundLoot') source.drop.amount -= 1;
+  logEvent(`你拾取${ITEM_META[item]?.label || item}×1。`, 'good');
+  const emptied = source.kind === 'groundLoot' ? source.drop.amount <= 0 : !Object.values(source.loot).some((amount) => amount > 0);
+  if (emptied) {
+    if (source.kind === 'groundLoot') state.groundLoot = state.groundLoot.filter((drop) => drop.id !== source.id);
+    state.lootReveal = null;
+    state.selectedTarget = null;
+  }
+  updateUI();
+}
+
 function addNoise(intensity, label = '声响') {
   if (intensity <= 0) return;
   if (state.buffs?.noiseScale != null) {
@@ -531,6 +621,7 @@ function movePlayer(dx, dy) {
   }
   state.player.x = nx;
   state.player.y = ny;
+  state.lootReveal = null;
   state.player.facing = dy < 0 ? 'n' : dy > 0 ? 's' : dx < 0 ? 'w' : 'e';
   visitAroundPlayer();
   advanceTurns(1, Math.max(0, state.inventory.heavy ? 2 : 0));
@@ -549,6 +640,7 @@ function enterSafeZone(safe) {
   if (!safe?.active || state.mode !== 'field') return false;
   state.currentSafeId = safe.id;
   state.selectedTarget = null;
+  state.lootReveal = null;
   logEvent(`你进入${safe.name}的热屏障范围。仓库和稳定电力已接通，可以整理物资、制作、修复或睡到下一天。`, 'good');
   updateUI();
   return true;
@@ -825,10 +917,11 @@ function bruteContainer() {
 
 function openContainer(container, violent) {
   container.status = 'open';
+  container.openedAt = performance.now();
   state.lootOpened += 1;
   if (violent && state.random() > 0.68) {
     const damaged = Object.keys(container.loot).find((item) => container.loot[item] > 0);
-    if (damaged) delete container.loot[damaged];
+    if (damaged) takeItem(container.loot, damaged, 1);
     logEvent(`${container.type}被撬开，但有一件物品被损坏。`, 'warn');
   } else {
     logEvent(`${container.type}已经打开。`, 'good');
@@ -841,12 +934,18 @@ function openContainer(container, violent) {
   state.selectedTarget = containerHasLoot(container) ? { kind: 'container', id: container.id } : null;
   if (containerHasLoot(container)) {
     const contents = Object.entries(container.loot).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、');
-    logEvent(`箱内物资：${contents}。物资仍留在箱中。`, 'warn');
+    showLootReveal('container', container.id, 'opening');
+    logEvent(`箱内物资：${contents}。`, 'warn');
+    window.setTimeout(() => {
+      if (state.mode !== 'field' || state.lootReveal?.kind !== 'container' || state.lootReveal?.id !== container.id) return;
+      state.lootReveal.phase = 'ready';
+      updateUI();
+    }, 640);
   }
   updateUI();
 }
 
-function lootContainer(target = selectedContainer() || nearestContainer(), { justOpened = false } = {}) {
+function lootContainer(target = selectedContainer() || nearestContainer()) {
   const container = target;
   if (!container || !containerHasLoot(container)) {
     logEvent('这个容器里已经没有可以带走的物资。');
@@ -856,23 +955,8 @@ function lootContainer(target = selectedContainer() || nearestContainer(), { jus
     logEvent('靠近容器后才能拾取剩余物资。', 'warn');
     return;
   }
-  const taken = {};
-  const left = {};
-  Object.entries(container.loot).forEach(([item, amount]) => {
-    const accepted = addCarriedItem(item, amount);
-    if (accepted > 0) taken[item] = accepted;
-    if (accepted < amount) left[item] = amount - accepted;
-  });
-  container.loot = left;
-  const summary = Object.entries(taken).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、');
-  if (summary) logEvent(`${justOpened ? '你获得' : '你取走'}：${summary}。`, 'good');
-  if (containerHasLoot(container)) {
-    const leftovers = Object.entries(container.loot).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、');
-    logEvent(`背包已满，${leftovers}留在${container.type}中。`, 'warn');
-    state.selectedTarget = { kind: 'container', id: container.id };
-  } else {
-    state.selectedTarget = null;
-  }
+  state.selectedTarget = { kind: 'container', id: container.id };
+  showLootReveal('container', container.id);
   updateUI();
 }
 
@@ -1083,7 +1167,7 @@ function transferToStash(item, requestedAmount = 1) {
   const safe = activeSafeAt(state.player);
   if (!safe) { logEvent('只有在安全点内才能存入仓库。', 'warn'); return; }
   state.currentSafeId = safe.id;
-  const amount = Math.min(requestedAmount, itemCount(state.inventory, item));
+  const amount = Math.min(1, requestedAmount, itemCount(state.inventory, item));
   if (amount <= 0) return;
   takeItem(state.inventory, item, amount);
   addItem(currentStash(), item, amount);
@@ -1097,7 +1181,7 @@ function takeFromStash(item, requestedAmount = 1) {
   if (!safe) { logEvent('只有在安全点内才能取用仓库物资。', 'warn'); return; }
   state.currentSafeId = safe.id;
   const stash = currentStash();
-  const available = Math.min(requestedAmount, itemCount(stash, item));
+  const available = Math.min(1, requestedAmount, itemCount(stash, item));
   let taken = 0;
   while (taken < available && canCarryItem(item)) {
     addItem(state.inventory, item, 1);
@@ -1106,7 +1190,7 @@ function takeFromStash(item, requestedAmount = 1) {
   if (taken > 0) {
     takeItem(stash, item, taken);
     state.selectedInventory = null;
-    logEvent(`已从${safe.name}仓库取出：${ITEM_META[item]?.label || item}×${taken}。`, 'good');
+    logEvent(`已从${safe.name}仓库取出：${ITEM_META[item]?.label || item}×1。`, 'good');
   }
   if (taken < available) logEvent('背包格数或负重不足，剩余物资仍在仓库。', 'warn');
   updateUI();
@@ -1115,7 +1199,7 @@ function takeFromStash(item, requestedAmount = 1) {
 function selectedInventoryEntry() {
   const selected = state.selectedInventory;
   if (!selected || itemCount(state.inventory, selected.item) <= 0) return null;
-  return { ...selected, amount: Math.min(selected.amount, itemCount(state.inventory, selected.item)) };
+  return { ...selected, amount: 1 };
 }
 
 function selectInventoryItem(item, amount, slotIndex) {
@@ -1127,15 +1211,19 @@ function selectInventoryItem(item, amount, slotIndex) {
 function storeSelectedItem() {
   const selected = selectedInventoryEntry();
   if (!selected) return;
-  transferToStash(selected.item, selected.amount);
+  transferToStash(selected.item, 1);
 }
 
 function discardSelectedItem() {
   const selected = selectedInventoryEntry();
   if (!selected) return;
-  takeItem(state.inventory, selected.item, selected.amount);
+  if (!takeItem(state.inventory, selected.item, 1)) return;
+  dropGroundItem(selected.item, 1);
   state.selectedInventory = null;
-  logEvent(`你丢弃了${ITEM_META[selected.item]?.label || selected.item}×${selected.amount}。`, 'warn');
+  const dropped = state.groundLoot.find((drop) => drop.x === state.player.x && drop.y === state.player.y && drop.item === selected.item);
+  state.selectedTarget = dropped ? { kind: 'groundLoot', id: dropped.id } : null;
+  if (dropped) showLootReveal('groundLoot', dropped.id);
+  logEvent(`你丢弃了${ITEM_META[selected.item]?.label || selected.item}×1，物资留在脚下。`, 'warn');
   updateUI();
 }
 
@@ -1216,10 +1304,12 @@ function visibleAt(x, y) {
 function objectAtCell(x, y) {
   const zombie = state.zombies.find((item) => isActiveZombie(item) && item.x === x && item.y === y);
   const corpse = state.zombies.find((item) => item.dead && item.x === x && item.y === y && state.visited.has(key(x, y)));
+  const groundLoot = groundLootAt(x, y);
   const container = state.containers.find((item) => item.x === x && item.y === y);
   const safe = state.safePoints.find((item) => item.x === x && item.y === y);
   const building = buildingAt(x, y);
   if (zombie && visibleAt(x, y)) return { kind: 'zombie', value: zombie };
+  if (groundLoot) return { kind: 'groundLoot', value: groundLoot };
   if (corpse) return { kind: 'corpse', value: corpse };
   if (container) return { kind: 'container', value: container };
   if (safe) return { kind: 'safe', value: safe };
@@ -1248,6 +1338,7 @@ function showTooltip(cell, pointer) {
 function describeObject(object, live) {
   if (object.kind === 'zombie') return `${zombieLabel(object.value)} · ${object.value.state === 'track' ? '正在锁定你' : '活动中'}${live ? '' : ' · 当前动态未知'}`;
   if (object.kind === 'corpse') return `${zombieLabel(object.value)} · 已死亡，尸体仍在此处`;
+  if (object.kind === 'groundLoot') return `地面物资 · ${groundLootLabel(object.value)} · 点击后单件拾取`;
   if (object.kind === 'container') {
     const remaining = Object.entries(object.value.loot || {}).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、');
     if (object.value.status === 'open') return `${object.value.type} · ${remaining ? `已打开，剩余 ${remaining}` : '已搜空'}`;
@@ -1299,6 +1390,7 @@ function draw() {
   state.buildings.forEach((building) => drawBuilding(building, cam));
   state.safePoints.forEach((safe) => drawSafePoint(safe, cam));
   drawContainers(cam);
+  drawGroundLoot(cam);
   drawTerminal(cam);
   drawExplorationLayers(cam);
   drawNoise(cam);
@@ -1443,9 +1535,37 @@ function drawContainers(cam) {
     ctx.fillStyle = open ? '#56615c' : container.type.includes('医疗') ? '#829b91' : container.type.includes('军') ? '#5f6b59' : '#927458';
     ctx.fillRect(-12, -7, 24, 15);
     ctx.strokeStyle = open ? 'rgba(224, 189, 122, .42)' : 'rgba(224, 210, 174, .34)'; ctx.strokeRect(-12, -7, 24, 15);
-    if (open) { ctx.fillStyle = '#303b37'; ctx.fillRect(-13, -14, 26, 5); }
+    if (open) {
+      const openProgress = clamp((performance.now() - (container.openedAt || 0)) / 280, 0, 1);
+      ctx.save();
+      ctx.translate(0, -14 - openProgress * 4);
+      ctx.rotate(-0.16 * openProgress);
+      ctx.fillStyle = '#303b37'; ctx.fillRect(-13, -2, 26, 5);
+      ctx.restore();
+    }
     else { ctx.fillStyle = 'rgba(242, 190, 100, .6)'; ctx.fillRect(-3, -2, 6, 3); }
     if (state.selectedTarget?.kind === 'container' && state.selectedTarget.id === container.id) { ctx.strokeStyle = 'rgba(238, 197, 119, .88)'; ctx.lineWidth = 2; ctx.strokeRect(-17, -12, 34, 26); }
+    ctx.restore();
+  });
+}
+
+function drawGroundLoot(cam) {
+  state.groundLoot.forEach((drop) => {
+    if (!visibleAt(drop.x, drop.y) && !state.visited.has(key(drop.x, drop.y))) return;
+    const point = worldToScreen(drop.x + 0.5, drop.y + 0.58, cam);
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, .38)';
+    ctx.fillRect(point.x - 13, point.y + 8, 26, 6);
+    ctx.fillStyle = '#9e7b4d';
+    ctx.fillRect(point.x - 11, point.y - 6, 22, 13);
+    ctx.fillStyle = '#d2ae68';
+    ctx.fillRect(point.x - 3, point.y - 8, 6, 17);
+    ctx.strokeStyle = state.selectedTarget?.kind === 'groundLoot' && state.selectedTarget.id === drop.id ? 'rgba(238, 197, 119, .9)' : 'rgba(226, 194, 125, .46)';
+    ctx.lineWidth = state.selectedTarget?.kind === 'groundLoot' && state.selectedTarget.id === drop.id ? 2 : 1;
+    ctx.strokeRect(-13 + point.x, -8 + point.y, 26, 18);
+    ctx.fillStyle = '#f0d28e';
+    ctx.font = '600 9px Segoe UI, Microsoft YaHei, sans-serif';
+    ctx.fillText(`×${drop.amount}`, point.x + 14, point.y - 7);
     ctx.restore();
   });
 }
@@ -1641,7 +1761,7 @@ function updateUI() {
       ? stashStacks.map(({ item, amount, limit }) => {
         const meta = ITEM_META[item] || { glyph: '·', label: item };
         const suffix = limit > 1 ? `×${amount}` : '';
-        return `<button class="stash-slot" data-stash-item="${item}" data-stash-amount="${amount}" title="取出到背包：${meta.label}×${amount}"><span>${meta.glyph}</span><small>${meta.label}${suffix}</small></button>`;
+        return `<button class="stash-slot" data-stash-item="${item}" title="取出到背包：${meta.label}×1"><span>${meta.glyph}</span><small>${meta.label}${suffix}</small></button>`;
       }).join('')
       : '<div class="stash-empty">空</div>';
   const safeDone = state.openedSafeCount >= 3; const sampleDone = totalSampleCount() >= 3; const terminalDone = state.terminalActivated;
@@ -1649,7 +1769,7 @@ function updateUI() {
   ui.missionStep.textContent = `${[safeDone, sampleDone, terminalDone].filter(Boolean).length} / 3`;
   ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `修复三个热灭活节点，取得耐热株核心样本。当前压力：${state.pressure}。`;
   renderRecipes();
-  updateButtons(); updateLog();
+  updateButtons(); updateLog(); renderLootReveal();
 }
 
 function recipeIngredientsText(recipe) {
@@ -1786,7 +1906,17 @@ ui.inventory.addEventListener('click', (event) => {
 ui.stashGrid.addEventListener('click', (event) => {
   const slot = event.target.closest('[data-stash-item]');
   if (!slot || state.mode !== 'field') return;
-  takeFromStash(slot.dataset.stashItem, Number(slot.dataset.stashAmount) || 1);
+  takeFromStash(slot.dataset.stashItem, 1);
+});
+ui.lootItems.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-loot-item]');
+  if (!button || button.disabled || state.mode !== 'field') return;
+  lootOne(button.dataset.lootKind, Number(button.dataset.lootSource), button.dataset.lootItem);
+});
+ui.lootClose.addEventListener('click', () => {
+  state.lootReveal = null;
+  state.selectedTarget = null;
+  updateUI();
 });
 ui.equipment.addEventListener('click', (event) => {
   const slot = event.target.closest('[data-equipment-item]');
@@ -1851,6 +1981,10 @@ function handleCanvasTap(pointer) {
   }
   if (object?.kind === 'container' && (object.value.status === 'closed' || containerHasLoot(object.value))) {
     selectTarget('container', object.value);
+    return;
+  }
+  if (object?.kind === 'groundLoot') {
+    selectTarget('groundLoot', object.value);
     return;
   }
   if (object?.kind === 'corpse') {
