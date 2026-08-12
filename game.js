@@ -34,6 +34,7 @@ const ui = {
   missionStep: document.querySelector('#mission-step'),
   missionText: document.querySelector('#mission-text'),
   safeObjective: document.querySelector('#objective-safe'),
+  safeObjectiveText: document.querySelector('#objective-safe-text'),
   sampleObjective: document.querySelector('#objective-sample'),
   terminalObjective: document.querySelector('#objective-terminal'),
   tooltip: document.querySelector('#canvas-tooltip'),
@@ -57,6 +58,8 @@ const MAX_TURNS = 64;
 const HEAT_RESISTANT_TYPE = 'hunter';
 const DAY_ZOMBIE_TARGET = 4;
 const NIGHT_ZOMBIE_TARGET = 28;
+const REQUIRED_FRONTLINE_SAFE_POINTS = 3;
+const REQUIRED_SAMPLES = 3;
 const EQUIPMENT_ITEMS = ['backpack', 'armor', 'weapon', 'suppressor'];
 const STACK_LIMITS = {
   water: 2,
@@ -268,7 +271,7 @@ function resetGame() {
     buffs: { noiseScale: null, contactShield: 0 },
     kills: 0,
     lootOpened: 0,
-    openedSafeCount: 1,
+    openedSafeCount: 0,
     terminalActivated: false,
     selectedTarget: null,
     selectedInventory: null,
@@ -295,7 +298,7 @@ function resetGame() {
   buildWorld();
   visitAroundPlayer();
   logEvent('你在初始隔离站醒来。白天的城市很安静，但安静不等于安全。', 'good');
-  logEvent('主线：修复三个热灭活节点，取得耐热株核心样本。', 'warn');
+  logEvent('主线：额外修复三个热灭活节点，取得三份耐热株核心样本。', 'warn');
   closeModal();
   updateUI();
 }
@@ -321,7 +324,19 @@ function buildWorld() {
     lockTurns: 0,
     loot: rollLoot(item.type),
   }));
+  guaranteeMissionSamples();
   spawnZombies(true);
+}
+
+function guaranteeMissionSamples() {
+  const sampleSources = state.containers.filter((container) => ['医疗冷藏柜', '样本柜'].includes(container.type));
+  if (!sampleSources.length) return;
+  let available = sampleSources.reduce((total, container) => total + itemCount(container.loot, 'sample'), 0);
+  while (available < REQUIRED_SAMPLES) {
+    const source = sampleSources[Math.floor(state.random() * sampleSources.length)];
+    addItem(source.loot, 'sample', 1);
+    available += 1;
+  }
 }
 
 function rollLoot(type) {
@@ -415,15 +430,19 @@ function wakeNightZombies() {
   });
 }
 
-function distanceToAnyActiveSafe(point) {
-  return Math.min(...state.safePoints.filter((safe) => safe.active).map((safe) => squareDistance(point, safe)));
+function distanceToAnyPoweredSafe(point) {
+  const distances = state.safePoints.filter((safe) => safe.active && safe.power > 0).map((safe) => squareDistance(point, safe));
+  return distances.length ? Math.min(...distances) : Infinity;
 }
 
 function buildingAt(x, y) { return state.buildings.find((building) => x >= building.x && x < building.x + building.w && y >= building.y && y < building.y + building.h); }
 function insideBuilding(point) { return Boolean(buildingAt(point.x, point.y)); }
 function squareDistance(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
-function activeSafeAt(point) { return state.safePoints.find((safe) => safe.active && squareDistance(point, safe) <= safe.radius); }
+function safeFacilityAt(point) { return state.safePoints.find((safe) => safe.active && squareDistance(point, safe) <= safe.radius); }
+function poweredSafeAt(point) { return state.safePoints.find((safe) => safe.active && safe.power > 0 && squareDistance(point, safe) <= safe.radius); }
 function candidateSafeAt(point) { return state.safePoints.find((safe) => !safe.active && dist(point, safe) <= 1.5); }
+function activeSafeCount() { return state.safePoints.filter((safe) => safe.active).length; }
+function sleepPowerCost() { return 6 + activeSafeCount(); }
 function containerHasLoot(container) { return Object.values(container.loot || {}).some((amount) => amount > 0); }
 function groundLootAt(x, y) { return state.groundLoot.find((drop) => drop.x === x && drop.y === y && drop.amount > 0); }
 function groundLootById(id) { return state.groundLoot.find((drop) => drop.id === id && drop.amount > 0); }
@@ -610,28 +629,49 @@ function addNoise(intensity, label = '声响') {
   if (intensity >= 10) logEvent(`${label}扩散开来，远处的玻璃开始震动。`, 'warn');
 }
 
+function noisePropagationRadius(event) {
+  return Math.max(0, event.intensity * currentWeather().sound);
+}
+
+function interruptActivationIfDisplaced() {
+  if (!state.activation) return false;
+  const candidate = state.safePoints.find((safe) => safe.id === state.activation.id && !safe.active);
+  if (candidate && dist(candidate, state.player) <= 1.5) return false;
+  state.activation = null;
+  logEvent('你离开了控制室，启动流程中断，进度已清零。', 'danger');
+  return true;
+}
+
+function setPlayerPosition(x, y) {
+  if (state.player.x === x && state.player.y === y) return;
+  state.player.x = x;
+  state.player.y = y;
+  interruptActivationIfDisplaced();
+}
+
 function movePlayer(dx, dy) {
   if (state.mode !== 'field') return;
-  const previousSafe = activeSafeAt(state.player);
+  const previousSafe = poweredSafeAt(state.player);
+  const previousFacility = safeFacilityAt(state.player);
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
-  if (!isWalkable(nx, ny)) {
-    logEvent('前方被废墟或积水堵住了。');
+  if (!isPlayerWalkable(nx, ny)) {
+    logEvent('前方被废墟、积水或感染体挡住了。');
     return;
   }
-  state.player.x = nx;
-  state.player.y = ny;
+  setPlayerPosition(nx, ny);
   state.lootReveal = null;
   state.player.facing = dy < 0 ? 'n' : dy > 0 ? 's' : dx < 0 ? 'w' : 'e';
   visitAroundPlayer();
   advanceTurns(1, Math.max(0, state.inventory.heavy ? 2 : 0));
   if (state.mode !== 'field') return;
-  const safe = activeSafeAt(state.player);
+  const safe = poweredSafeAt(state.player);
+  const facility = safeFacilityAt(state.player);
   if (previousSafe && !safe) {
     logEvent(`你离开${previousSafe.name}的热屏障范围，背包与装备保持当前状态。`, 'warn');
   }
-  if (safe && (!previousSafe || state.currentSafeId !== safe.id)) {
-    enterSafeZone(safe);
+  if (facility && (!previousFacility || state.currentSafeId !== facility.id)) {
+    enterSafeZone(facility);
   }
   updateUI();
 }
@@ -641,7 +681,11 @@ function enterSafeZone(safe) {
   state.currentSafeId = safe.id;
   state.selectedTarget = null;
   state.lootReveal = null;
-  logEvent(`你进入${safe.name}的热屏障范围。仓库和稳定电力已接通，可以整理物资、制作、修复或睡到下一天。`, 'good');
+  if (safe.power > 0) {
+    logEvent(`你进入${safe.name}的热屏障范围。仓库和稳定电力已接通，可以整理物资、制作、修复或睡到下一天。`, 'good');
+  } else {
+    logEvent(`你进入${safe.name}的设施范围。热屏障已经断电，仓库仍可使用；维修后才能制作或睡觉。`, 'warn');
+  }
   updateUI();
   return true;
 }
@@ -649,6 +693,10 @@ function enterSafeZone(safe) {
 function isWalkable(x, y) {
   if (x < 0 || x >= WORLD_W || y < 0 || y >= WORLD_H) return false;
   return state.terrain[y][x] !== 'water';
+}
+
+function isPlayerWalkable(x, y) {
+  return isWalkable(x, y) && !state.zombies.some((zombie) => isActiveZombie(zombie) && zombie.x === x && zombie.y === y);
 }
 
 function advanceTurns(cost = 1, noise = 0) {
@@ -670,6 +718,7 @@ function advanceTurns(cost = 1, noise = 0) {
     if (state.turn === 45) logEvent('气温开始下降。高温压制正在减弱，夜行感染体即将复苏。', 'warn');
     if (nightBegins) logEvent('夜幕降临。常规感染体重新涌入街区，新的尸群正在出现。', 'danger');
     updateZombies(zombieAction);
+    if (state.mode !== 'field') return;
     if (nightBegins) {
       wakeNightZombies();
       spawnNightSurge();
@@ -685,7 +734,7 @@ function advanceTurns(cost = 1, noise = 0) {
       return;
     }
     if (state.turn >= MAX_TURNS) {
-      const safe = activeSafeAt(state.player);
+      const safe = poweredSafeAt(state.player);
       startNextDay();
       logEvent(safe
         ? `第${state.day}天白天开始。你在${safe.name}内度过了夜晚，普通夜行尸已进入蛰伏。今日天气：${currentWeather().name}。`
@@ -721,7 +770,7 @@ function spawnOne({ night = isNight(), minDistance = night ? 3 : 7, allowVisible
     const point = { x: 1 + Math.floor(state.random() * (WORLD_W - 2)), y: 1 + Math.floor(state.random() * (WORLD_H - 2)) };
     // Night arrivals may materialize inside view, but never within two square
     // tiles of the player and never near an active thermal safe point.
-    if (squareDistance(point, state.player) < minDistance || distanceToAnyActiveSafe(point) < 8) continue;
+    if (squareDistance(point, state.player) < minDistance || distanceToAnyPoweredSafe(point) < 8) continue;
     if (!allowVisible && visibleAt(point.x, point.y)) continue;
     const type = night ? rollNightZombieType() : HEAT_RESISTANT_TYPE;
     state.zombies.push({ id: `${state.day}-${state.turn}-${state.zombies.length}`, ...point, type, hp: type === 'brute' ? 130 : type === 'hunter' ? 74 : 52, state: 'wander', cooldown: 0, seen: false });
@@ -741,7 +790,7 @@ function rollNightZombieType() {
 function updateZombies(zombieAction = null) {
   const playerPoint = state.player;
   const lastNoise = state.noiseEvents[state.noiseEvents.length - 1];
-  const playerSafe = activeSafeAt(playerPoint);
+  const playerSafe = poweredSafeAt(playerPoint);
   for (const zombie of state.zombies) {
     if (!isActiveZombie(zombie)) continue;
     if (zombieAction?.has(zombie.id)) continue;
@@ -756,7 +805,7 @@ function updateZombies(zombieAction = null) {
     // A zombie that began adjacent attacks in place; it cannot move and attack
     // in the same turn. Zombies that were not adjacent may move, but their
     // newly adjacent position does not deal damage until the next turn.
-    const wasAdjacent = adjacent(zombie, playerPoint);
+    const wasAdjacent = manhattan(zombie, playerPoint) <= 1;
     zombie.cooldown = Math.max(0, zombie.cooldown - 1);
     if (wasAdjacent) {
       if (zombie.cooldown === 0) {
@@ -782,14 +831,11 @@ function updateZombies(zombieAction = null) {
       if (state.random() > 0.18) continue;
     }
     const noiseDist = lastNoise ? dist(zombie, lastNoise) : 999;
-    if (zombieDist <= 4 || noiseDist <= 4) {
+    const noiseRadius = lastNoise ? noisePropagationRadius(lastNoise) : 0;
+    if (zombieDist <= 4) {
       zombie.state = 'track';
-      const target = zombieDist <= 4 ? playerPoint : lastNoise;
-      stepZombie(zombie, target);
-    } else if (noiseDist <= 8) {
-      zombie.state = 'investigate';
-      stepZombie(zombie, lastNoise);
-    } else if (noiseDist <= 14 && state.random() < 0.32) {
+      stepZombie(zombie, playerPoint);
+    } else if (lastNoise && noiseDist <= noiseRadius) {
       zombie.state = 'investigate';
       stepZombie(zombie, lastNoise);
     } else if (isNight() || insideBuilding(zombie)) {
@@ -876,7 +922,7 @@ function inspectArea() {
   } else if (zombie) {
     logEvent(`近处是${zombieLabel(zombie)}，它的动作还没有完全转向你。`, 'danger');
   } else if (terminalNearby()) {
-    logEvent('区域终端仍有电，但需要3个已开辟安全点和耐热株核心样本。', 'warn');
+    logEvent('区域终端仍有电，但需要额外开辟3个前线安全点并取得3份耐热株核心样本。', 'warn');
   } else {
     const building = buildingAt(state.player.x, state.player.y);
     logEvent(building
@@ -926,9 +972,8 @@ function openContainer(container, violent) {
   } else {
     logEvent(`${container.type}已经打开。`, 'good');
   }
-  if (manhattan(container, state.player) <= 1 && isWalkable(container.x, container.y)) {
-    state.player.x = container.x;
-    state.player.y = container.y;
+  if (manhattan(container, state.player) <= 1 && isPlayerWalkable(container.x, container.y)) {
+    setPlayerPosition(container.x, container.y);
     visitAroundPlayer();
   }
   state.selectedTarget = containerHasLoot(container) ? { kind: 'container', id: container.id } : null;
@@ -967,13 +1012,11 @@ function melee() {
   const attackCell = { x: zombie.x, y: zombie.y };
   const damage = 28 + (itemCount(state.inventory, 'metal') > 4 ? 4 : 0) + (equipped('weapon') ? 12 : 0);
   zombie.hp -= damage;
+  const killed = settleZombieDeath(zombie);
   advanceTurns(1, 3);
-  if (zombie.hp <= 0) {
-    state.kills += 1;
-    zombie.dead = true;
-    zombie.corpseTTL = Infinity;
-    if (isWalkable(attackCell.x, attackCell.y)) { state.player.x = attackCell.x; state.player.y = attackCell.y; visitAroundPlayer(); }
-    state.selectedTarget = null;
+  if (state.mode !== 'field') return;
+  if (killed) {
+    if (isPlayerWalkable(attackCell.x, attackCell.y)) { setPlayerPosition(attackCell.x, attackCell.y); visitAroundPlayer(); }
     logEvent(`${zombieLabel(zombie)}倒下，地面留下新鲜血迹。你占据了它原来的格子。`, 'good');
   }
   else logEvent(`你击中${zombieLabel(zombie)}，造成${damage}点伤害。`, 'warn');
@@ -992,19 +1035,26 @@ function shoot() {
   const damage = zombie.type === 'brute' ? 38 : 58;
   const suppressed = equipped('suppressor');
   zombie.hp -= damage;
+  const killed = settleZombieDeath(zombie);
   advanceTurns(1, suppressed ? 7 : 18);
-  if (zombie.hp <= 0) {
-    state.kills += 1;
-    zombie.dead = true;
-    zombie.corpseTTL = Infinity;
-    if (firedFromAdjacent && isWalkable(shotTargetCell.x, shotTargetCell.y)) {
-      state.player.x = shotTargetCell.x; state.player.y = shotTargetCell.y; visitAroundPlayer();
+  if (state.mode !== 'field') return;
+  if (killed) {
+    if (firedFromAdjacent && isPlayerWalkable(shotTargetCell.x, shotTargetCell.y)) {
+      setPlayerPosition(shotTargetCell.x, shotTargetCell.y); visitAroundPlayer();
     }
-    state.selectedTarget = null;
     logEvent(`${suppressed ? '沉闷的枪声' : '枪声'}停下，${zombieLabel(zombie)}倒在${firedFromAdjacent ? '脚边' : '远处'}。`, 'good');
   }
   else logEvent(`子弹击中${zombieLabel(zombie)}，造成${damage}点伤害。`, 'warn');
   updateUI();
+}
+
+function settleZombieDeath(zombie) {
+  if (zombie.hp > 0 || zombie.dead) return false;
+  state.kills += 1;
+  zombie.dead = true;
+  zombie.corpseTTL = Infinity;
+  if (state.selectedTarget?.kind === 'zombie' && state.selectedTarget.id === zombie.id) state.selectedTarget = null;
+  return true;
 }
 
 function useMedkit() {
@@ -1049,6 +1099,10 @@ function activateSafePoint() {
   if (state.mode !== 'field') return;
   const candidate = candidateSafeAt(state.player);
   if (!candidate) { logEvent('附近没有可开辟的隔离设施。'); return; }
+  if (state.activation && state.activation.id !== candidate.id) {
+    state.activation = null;
+    logEvent('你离开了原控制室，之前的启动进度已清零。', 'danger');
+  }
   if (!state.activation || state.activation.id !== candidate.id) {
     if (itemCount(state.inventory, 'metal') < 6 || itemCount(state.inventory, 'filter') < 1 || itemCount(state.inventory, 'battery') < 1) {
       logEvent('开辟需要金属×6、滤芯×1、电池×1。', 'warn');
@@ -1060,10 +1114,13 @@ function activateSafePoint() {
     state.activation = { id: candidate.id, progress: 0 };
     logEvent(`开始启动${candidate.name}。连续3回合不能离开现场。`, 'warn');
   }
-  if (dist(candidate, state.player) > 1.5) { logEvent('你离开了控制室，启动流程中断。', 'danger'); state.activation = null; return; }
   state.activation.progress += 1;
   advanceTurns(1, 8);
   if (state.mode !== 'field') return;
+  if (!state.activation || state.activation.id !== candidate.id) {
+    updateUI();
+    return;
+  }
   if (state.activation.progress >= 3) {
     candidate.active = true;
     candidate.radius = 2;
@@ -1085,7 +1142,7 @@ function activateSafePoint() {
 function craftRecipe(action) {
   const recipe = RECIPES[action];
   if (!recipe) return;
-  const safe = activeSafeAt(state.player);
+  const safe = safeFacilityAt(state.player);
   if (!safe) {
     logEvent('野外没有稳定电力。回到安全点内，才能使用工作台制作。', 'warn');
     return;
@@ -1119,15 +1176,17 @@ function craftBandage() { return craftRecipe('craft-bandage'); }
 function craftDecoder() { return craftRecipe('craft-decoder'); }
 
 function repairSafePoint() {
-  const safe = activeSafeAt(state.player);
+  const safe = safeFacilityAt(state.player);
   if (!safe) { logEvent('需要站在安全点内修复热屏障。'); return; }
   state.currentSafeId = safe.id;
   const stash = currentStash();
   if (itemCount(stash, 'metal') < 4 || itemCount(stash, 'filter') < 1 || itemCount(stash, 'battery') < 1) { logEvent('修复热屏障需要金属×4、滤芯×1、电池×1。'); return; }
-  takeItem(stash, 'metal', 4); takeItem(stash, 'filter'); takeItem(stash, 'battery'); safe.power = clamp(safe.power + 36, 0, 120); safe.radius = Math.max(safe.radius, safe.level >= 2 ? 3 : 2);
+  takeItem(stash, 'metal', 4); takeItem(stash, 'filter'); takeItem(stash, 'battery');
   logEvent(`${safe.name}开始修复热屏障，预计耗时2回合。`, 'warn');
   advanceTurns(2, 0);
   if (state.mode !== 'field') return;
+  safe.power = clamp(safe.power + 36, 0, 120);
+  safe.radius = Math.max(safe.radius, safe.level >= 2 ? 3 : 2);
   logEvent(`${safe.name}的热屏障恢复了稳定输出。`, 'good'); updateUI();
 }
 
@@ -1141,9 +1200,9 @@ function startNextDay({ slept = false } = {}) {
     state.health = clamp(state.health + 12, 0, 100);
     state.thirst = clamp(state.thirst - 12, 0, 100);
     state.hunger = clamp(state.hunger - 8, 0, 100);
-    state.activation = null;
     state.selectedTarget = null;
   }
+  state.activation = null;
   state.noiseEvents = [];
   // Ordinary night infections hibernate at dawn; every live entity and corpse remains in the world.
   spawnZombies(false);
@@ -1151,20 +1210,25 @@ function startNextDay({ slept = false } = {}) {
 }
 
 function actionRest() {
-  const safe = activeSafeAt(state.player);
+  const safe = poweredSafeAt(state.player);
   if (!safe) {
-    logEvent('只有在安全点内才能睡觉到下一天。', 'warn');
+    logEvent('只有在有电的安全点内才能睡觉到下一天。', 'warn');
     return;
   }
   state.currentSafeId = safe.id;
-  safe.power = Math.max(0, safe.power - 6 - state.openedSafeCount);
+  const sleepCost = sleepPowerCost();
+  if (safe.power < sleepCost) {
+    logEvent(`电力不足：睡到下一天需要${sleepCost}电力，当前只有${Math.round(safe.power)}。`, 'warn');
+    return;
+  }
+  safe.power -= sleepCost;
   startNextDay({ slept: true });
   logEvent(`第${state.day}天开始。${safe.name}电力剩余${Math.round(safe.power)}%，普通夜行尸已进入蛰伏。今日天气：${currentWeather().name}。`, state.pressure >= 4 ? 'warn' : 'good');
   updateUI();
 }
 
 function transferToStash(item, requestedAmount = 1) {
-  const safe = activeSafeAt(state.player);
+  const safe = safeFacilityAt(state.player);
   if (!safe) { logEvent('只有在安全点内才能存入仓库。', 'warn'); return; }
   state.currentSafeId = safe.id;
   const amount = Math.min(1, requestedAmount, itemCount(state.inventory, item));
@@ -1177,7 +1241,7 @@ function transferToStash(item, requestedAmount = 1) {
 }
 
 function takeFromStash(item, requestedAmount = 1) {
-  const safe = activeSafeAt(state.player);
+  const safe = safeFacilityAt(state.player);
   if (!safe) { logEvent('只有在安全点内才能取用仓库物资。', 'warn'); return; }
   state.currentSafeId = safe.id;
   const stash = currentStash();
@@ -1263,8 +1327,8 @@ function activateTerminal() {
   if (state.mode !== 'field') { logEvent('终端需要在研究区现场启动。'); return; }
   if (!terminalNearby()) { logEvent('你还没有到达区域热灭活终端。'); return; }
   const totalSample = totalSampleCount();
-  if (state.openedSafeCount < 3) { logEvent('终端拒绝启动：至少需要3个已开辟安全点。', 'warn'); return; }
-  if (totalSample < 3) { logEvent('终端需要3份耐热株核心样本。', 'warn'); return; }
+  if (state.openedSafeCount < REQUIRED_FRONTLINE_SAFE_POINTS) { logEvent('终端拒绝启动：需要额外开辟3个前线安全点。', 'warn'); return; }
+  if (totalSample < REQUIRED_SAMPLES) { logEvent('终端需要3份耐热株核心样本。', 'warn'); return; }
   state.terminalActivated = true;
   logEvent('终端开始广播热灭活协议。城市的热源网络正在重新点亮。', 'good');
   endRun('won', '你完成了区域热灭活，安全点网络重新覆盖了城市。');
@@ -1273,6 +1337,10 @@ function activateTerminal() {
 function endRun(result, copy) {
   if (state.mode === 'dead' || state.mode === 'won') return;
   state.mode = result;
+  state.selectedTarget = null;
+  state.selectedInventory = null;
+  state.lootReveal = null;
+  state.activation = null;
   ui.endEyebrow.textContent = result === 'won' ? 'RUN COMPLETE' : 'RUN ENDED';
   ui.endTitle.textContent = result === 'won' ? '区域热灭活完成' : '你倒下了';
   ui.endCopy.textContent = copy;
@@ -1605,7 +1673,7 @@ function drawExplorationLayers(cam) {
 function drawNoise(cam) {
   state.noiseEvents.forEach((event) => {
     const point = worldToScreen(event.x + 0.5, event.y + 0.5, cam);
-    const radius = (4 + (3 - event.ttl) * 2) * TILE;
+    const radius = noisePropagationRadius(event) * TILE;
     ctx.save();
     ctx.strokeStyle = `rgba(232, 197, 118, ${0.18 * event.ttl / 3})`;
     ctx.lineWidth = 1.5;
@@ -1700,15 +1768,16 @@ function drawPointer(cam) {
 function updateUI() {
   if (!state) return;
   const phase = phaseName();
-  const activeSafe = activeSafeAt(state.player);
-  const safe = activeSafe || state.safePoints[state.currentSafeId];
-  ui.runStatus.textContent = `第${state.day}天 · ${phase}${activeSafe ? ' · 安全点内' : ''}`;
-  ui.safeStatus.textContent = activeSafe && activeSafe.power > 22 ? '热屏障稳定 · 安全点内' : safe && safe.active && safe.power > 22 ? '热屏障稳定' : '外围保护偏弱';
+  const activeSafe = poweredSafeAt(state.player);
+  const facilitySafe = safeFacilityAt(state.player);
+  const safe = facilitySafe || state.safePoints[state.currentSafeId];
+  ui.runStatus.textContent = `第${state.day}天 · ${phase}${activeSafe ? ' · 热屏障内' : facilitySafe ? ' · 安全点设施' : ''}`;
+  ui.safeStatus.textContent = activeSafe && activeSafe.power > 22 ? '热屏障稳定 · 安全点内' : activeSafe ? '热屏障低功率 · 安全点内' : facilitySafe ? '热屏障离线 · 可维修' : safe && safe.active && safe.power > 22 ? '热屏障稳定' : safe?.active && safe.power <= 0 ? '热屏障离线' : '外围保护偏弱';
   ui.pressure.textContent = `压力 ${state.pressure}`;
   ui.turn.textContent = `${state.turn} / ${MAX_TURNS}`;
   ui.weather.textContent = `${currentWeather().icon} ${currentWeather().name}`;
   ui.location.textContent = locationName();
-  ui.safeCount.textContent = `${state.openedSafeCount} / ${state.safePoints.length}`;
+  ui.safeCount.textContent = `${activeSafeCount()} / ${state.safePoints.length}`;
   const health = clamp(state.health, 0, 100);
   const thirst = clamp(state.thirst, 0, 100);
   const hunger = clamp(state.hunger, 0, 100);
@@ -1752,11 +1821,11 @@ function updateUI() {
   const stash = currentStash();
   const stashStacks = inventoryStacks(stash);
   const stashUnits = Object.values(stash).reduce((total, amount) => total + amount, 0);
-  ui.stashName.textContent = activeSafe ? `${activeSafe.name}仓库` : `${safe?.name || '安全点'}仓库`;
-  ui.stash.textContent = activeSafe ? (stashUnits ? `${stashUnits}件 · ${stashStacks.length}组` : '空') : '需在安全点';
-  ui.stashGrid.classList.toggle('locked', !activeSafe);
-  ui.stashGrid.innerHTML = !activeSafe
-    ? '<div class="stash-empty">需在安全点</div>'
+  ui.stashName.textContent = facilitySafe ? `${facilitySafe.name}仓库` : `${safe?.name || '安全点'}仓库`;
+  ui.stash.textContent = facilitySafe ? (stashUnits ? `${stashUnits}件 · ${stashStacks.length}组` : '空') : '需在安全点设施';
+  ui.stashGrid.classList.toggle('locked', !facilitySafe);
+  ui.stashGrid.innerHTML = !facilitySafe
+    ? '<div class="stash-empty">需在安全点设施</div>'
     : stashStacks.length
       ? stashStacks.map(({ item, amount, limit }) => {
         const meta = ITEM_META[item] || { glyph: '·', label: item };
@@ -1764,10 +1833,11 @@ function updateUI() {
         return `<button class="stash-slot" data-stash-item="${item}" title="取出到背包：${meta.label}×1"><span>${meta.glyph}</span><small>${meta.label}${suffix}</small></button>`;
       }).join('')
       : '<div class="stash-empty">空</div>';
-  const safeDone = state.openedSafeCount >= 3; const sampleDone = totalSampleCount() >= 3; const terminalDone = state.terminalActivated;
+  const safeDone = state.openedSafeCount >= REQUIRED_FRONTLINE_SAFE_POINTS; const sampleDone = totalSampleCount() >= REQUIRED_SAMPLES; const terminalDone = state.terminalActivated;
   ui.safeObjective.classList.toggle('done', safeDone); ui.sampleObjective.classList.toggle('done', sampleDone); ui.terminalObjective.classList.toggle('done', terminalDone);
+  ui.safeObjectiveText.textContent = `额外开辟前线安全点 ${Math.min(state.openedSafeCount, REQUIRED_FRONTLINE_SAFE_POINTS)} / ${REQUIRED_FRONTLINE_SAFE_POINTS}`;
   ui.missionStep.textContent = `${[safeDone, sampleDone, terminalDone].filter(Boolean).length} / 3`;
-  ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `修复三个热灭活节点，取得耐热株核心样本。当前压力：${state.pressure}。`;
+  ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `额外修复三个热灭活节点，取得三份耐热株核心样本。当前压力：${state.pressure}。`;
   renderRecipes();
   updateButtons(); updateLog(); renderLootReveal();
 }
@@ -1780,12 +1850,14 @@ function recipeIngredientsText(recipe) {
 
 function renderRecipes() {
   if (!ui.recipes) return;
-  const activeSafe = activeSafeAt(state.player);
-  const inSafe = Boolean(activeSafe);
-  const safe = activeSafe || state.safePoints[state.currentSafeId];
+  const facilitySafe = safeFacilityAt(state.player);
+  const inSafe = Boolean(facilitySafe);
+  const safe = facilitySafe || state.safePoints[state.currentSafeId];
   ui.workbenchStatus.textContent = inSafe ? `${safe.name} · 电力 ${Math.round(safe.power)}%` : '需回安全点';
   ui.recipeLock.textContent = inSafe
-    ? '工作台已接入安全点微电网；制作会消耗电力并推进多个回合。'
+    ? safe.power > 0
+      ? '工作台已接入安全点微电网；制作会消耗电力并推进多个回合。'
+      : '热屏障已经断电。先用仓库材料修复安全点，再恢复制作。'
     : '野外没有稳定电力。配方可查看，回到安全点内才可制作。';
   ui.recipes.innerHTML = Object.entries(RECIPES).map(([action, recipe]) => {
     const missing = Object.entries(recipe.ingredients)
@@ -1810,7 +1882,7 @@ function setMeter(element, value, color) { element.style.width = `${clamp(value,
 function locationName() {
   const building = buildingAt(state.player.x, state.player.y);
   if (building) return building.name;
-  const safe = activeSafeAt(state.player);
+  const safe = safeFacilityAt(state.player);
   if (safe) return safe.name;
   if (state.player.y >= 13 && state.player.y <= 15) return '北南主干道';
   return '街区外沿';
@@ -1821,9 +1893,10 @@ function updateButtons() {
   const container = selectedContainer();
   const closeZombie = selectedZombie();
   const selectedKind = state.selectedTarget?.kind || null;
-  const activeSafe = activeSafeAt(state.player);
-  const inSafe = Boolean(activeSafe);
-  const safe = activeSafe || state.safePoints[state.currentSafeId];
+  const facilitySafe = safeFacilityAt(state.player);
+  const activeSafe = poweredSafeAt(state.player);
+  const inSafe = Boolean(facilitySafe);
+  const safe = facilitySafe || state.safePoints[state.currentSafeId];
   const selectedItem = selectedInventoryEntry();
   const visibleTarget = closeZombie && visibleAt(closeZombie.x, closeZombie.y) && dist(closeZombie, state.player) <= 8 ? closeZombie : null;
   const hasContainerContext = Boolean(container && selectedKind === 'container' && manhattan(container, state.player) <= 1);
@@ -1853,7 +1926,8 @@ function updateButtons() {
       if (action === 'activate') enabled = Boolean(candidate);
       if (action === 'terminal') enabled = terminalNearby();
       if (recipe) enabled = inSafe && safe.power >= recipe.power && Object.entries(recipe.ingredients).every(([item, amount]) => itemCount(currentStash(), item) >= amount);
-      if (action === 'repair' || action === 'rest') enabled = inSafe;
+      if (action === 'repair') enabled = inSafe;
+      if (action === 'rest') enabled = Boolean(activeSafe && activeSafe.power >= sleepPowerCost());
       if (action === 'recenter') enabled = true;
     }
     button.disabled = !enabled;
@@ -1866,7 +1940,8 @@ function updateButtons() {
     else if (action === 'shoot') targetContext = hasShootContext;
     else if (action === 'drink') targetContext = itemCount(state.inventory, 'water') > 0 && state.mode === 'field';
     else if (action === 'eat') targetContext = itemCount(state.inventory, 'food') > 0 && state.mode === 'field';
-    else if (recipe || action === 'repair' || action === 'rest') targetContext = inSafe;
+    else if (recipe || action === 'repair') targetContext = inSafe;
+    else if (action === 'rest') targetContext = Boolean(facilitySafe);
     else if (action === 'activate') targetContext = Boolean(candidate) && state.mode === 'field';
     else if (action === 'terminal') targetContext = terminalNearby() && state.mode === 'field';
     else if (action === 'use-adrenaline') targetContext = itemCount(state.inventory, 'adrenaline') > 0 && state.mode === 'field';
@@ -1884,7 +1959,7 @@ function updateButtons() {
       const label = button.querySelector('span:not(.action-glyph)');
       const small = button.querySelector('small');
       if (label) label.textContent = '睡觉到下一天';
-      if (small) small.textContent = inSafe ? '推进天数 · 消耗电力' : '需在安全点';
+      if (small) small.textContent = activeSafe ? activeSafe.power >= sleepPowerCost() ? `消耗 ${sleepPowerCost()} 电力` : '电力不足' : facilitySafe ? '热屏障离线' : '需在安全点';
     }
   });
 }
