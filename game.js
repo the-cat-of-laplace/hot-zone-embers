@@ -60,6 +60,11 @@ const DAY_ZOMBIE_TARGET = 4;
 const NIGHT_ZOMBIE_TARGET = 28;
 const REQUIRED_FRONTLINE_SAFE_POINTS = 3;
 const REQUIRED_SAMPLES = 3;
+const ENGINEERING_RESERVES = {
+  metal: { minimum: 20, sources: ['快递箱', '工具箱', '军用箱', '警械柜', '燃料桶'] },
+  filter: { minimum: 5, sources: ['医疗冷藏柜', '工具箱', '电子柜'] },
+  battery: { minimum: 5, sources: ['货架箱', '样本柜', '工具箱', '军用箱', '电子柜', '燃料桶'] },
+};
 const EQUIPMENT_ITEMS = ['backpack', 'armor', 'weapon', 'suppressor'];
 const STACK_LIMITS = {
   water: 2,
@@ -324,8 +329,24 @@ function buildWorld() {
     lockTurns: 0,
     loot: rollLoot(item.type),
   }));
+  guaranteeEngineeringResources();
   guaranteeMissionSamples();
   spawnZombies(true);
+}
+
+function guaranteeEngineeringResources() {
+  Object.entries(ENGINEERING_RESERVES).forEach(([item, reserve]) => {
+    const sources = state.containers.filter((container) => reserve.sources.includes(container.type));
+    if (!sources.length) return;
+    let available = state.containers.reduce((total, container) => total + itemCount(container.loot, item), 0);
+    while (available < reserve.minimum) {
+      const lowestStock = Math.min(...sources.map((container) => itemCount(container.loot, item)));
+      const leastStocked = sources.filter((container) => itemCount(container.loot, item) === lowestStock);
+      const source = leastStocked[Math.floor(state.random() * leastStocked.length)];
+      addItem(source.loot, item, 1);
+      available += 1;
+    }
+  });
 }
 
 function guaranteeMissionSamples() {
@@ -380,7 +401,7 @@ function rollLoot(type) {
   };
   const pool = commonPools[type] || ['metal', 'cloth', 'water'];
   const loot = {};
-  const commonRolls = 2 + (state.random() > 0.68 ? 1 : 0);
+  const commonRolls = 3;
   for (let index = 0; index < commonRolls; index += 1) {
     const item = pool[Math.floor(state.random() * pool.length)];
     loot[item] = (loot[item] || 0) + quantityFor(item);

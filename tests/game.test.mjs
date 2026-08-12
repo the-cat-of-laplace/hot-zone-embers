@@ -74,9 +74,10 @@ function createGame() {
     getState: () => state,
     setState: (next) => { state = next; },
     rng, resetGame, buildWorld, totalSampleCount, isPlayerWalkable, noisePropagationRadius,
+    guaranteeEngineeringResources,
     safeFacilityAt, poweredSafeAt, repairSafePoint, actionRest, setPlayerPosition, addNoise, activateSafePoint,
     activateTerminal, melee, shoot, advanceTurns, updateZombies, emptyStash, startNextDay,
-    constants: { REQUIRED_FRONTLINE_SAFE_POINTS, REQUIRED_SAMPLES, WEATHER, SAFE_TEMPLATES, WORLD_W, WORLD_H },
+    constants: { REQUIRED_FRONTLINE_SAFE_POINTS, REQUIRED_SAMPLES, ENGINEERING_RESERVES, WEATHER, SAFE_TEMPLATES, WORLD_W, WORLD_H },
   };`, sandbox);
   return sandbox.__game;
 }
@@ -136,6 +137,22 @@ test('every generated world contains at least three mission samples', () => {
     game.buildWorld();
     const samples = state.containers.reduce((total, container) => total + (container.loot.sample || 0), 0);
     assert.ok(samples >= game.constants.REQUIRED_SAMPLES, `seed ${seed} only generated ${samples} samples`);
+  }
+});
+
+test('every generated world can fund the main objective plus an engineering reserve', () => {
+  const game = createGame();
+  for (let seed = 1; seed <= 1000; seed += 1) {
+    game.resetGame();
+    const state = game.getState();
+    state.random = game.rng(seed);
+    game.buildWorld();
+    const total = (item) => state.containers.reduce((sum, container) => sum + (container.loot[item] || 0), 0);
+    assert.ok(total('metal') >= 20, `seed ${seed} only generated ${total('metal')} metal`);
+    assert.ok(total('filter') >= 5, `seed ${seed} only generated ${total('filter')} filters`);
+    assert.ok(total('battery') >= 5, `seed ${seed} only generated ${total('battery')} batteries`);
+    assert.ok(total('metal') + (state.safePoints[0].stash.metal || 0) >= 24, `seed ${seed} cannot cover three activations and a repair reserve`);
+    assert.ok(state.containers.every((container) => Object.values(container.loot).reduce((sum, amount) => sum + amount, 0) >= 3), `seed ${seed} generated a container with fewer than three item units`);
   }
 });
 
