@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../game.js', import.meta.url), 'utf8');
+const htmlSource = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 function createElement(selector = '') {
   return {
@@ -76,8 +77,8 @@ function createGame() {
     rng, resetGame, buildWorld, totalSampleCount, isPlayerWalkable, noisePropagationRadius,
     guaranteeEngineeringResources,
     safeFacilityAt, poweredSafeAt, repairSafePoint, actionRest, setPlayerPosition, addNoise, activateSafePoint,
-    activateTerminal, melee, shoot, advanceTurns, updateZombies, emptyStash, startNextDay,
-    constants: { REQUIRED_FRONTLINE_SAFE_POINTS, REQUIRED_SAMPLES, ENGINEERING_RESERVES, WEATHER, SAFE_TEMPLATES, WORLD_W, WORLD_H },
+    activateTerminal, openContainer, melee, shoot, advanceTurns, updateZombies, emptyStash, startNextDay,
+    constants: { REQUIRED_FRONTLINE_SAFE_POINTS, REQUIRED_SAMPLES, MISSION_CRITICAL_ITEMS, ENGINEERING_RESERVES, WEATHER, SAFE_TEMPLATES, WORLD_W, WORLD_H },
   };`, sandbox);
   return sandbox.__game;
 }
@@ -138,6 +139,30 @@ test('every generated world contains at least three mission samples', () => {
     const samples = state.containers.reduce((total, container) => total + (container.loot.sample || 0), 0);
     assert.ok(samples >= game.constants.REQUIRED_SAMPLES, `seed ${seed} only generated ${samples} samples`);
   }
+});
+
+test('mission sample uses one player-facing name everywhere', () => {
+  const playerFacingCopy = `${source}\n${htmlSource}`;
+  assert.match(playerFacingCopy, /耐热株核心样本/);
+  assert.doesNotMatch(playerFacingCopy, /耐热株样本/);
+});
+
+test('violent container opening cannot destroy mission-critical resources', () => {
+  const game = createGame();
+  const protectedLoot = Object.fromEntries([...game.constants.MISSION_CRITICAL_ITEMS].map((item) => [item, 1]));
+  const container = { id: 1, x: 5, y: 5, type: '样本柜', status: 'closed', loot: { ...protectedLoot, chemical: 1 } };
+  const state = makeState({
+    random: () => 1,
+    containers: [container],
+    player: { x: 5, y: 5, facing: 's' },
+  });
+  game.setState(state);
+  game.openContainer(container, true);
+  assert.deepEqual(
+    Object.fromEntries([...game.constants.MISSION_CRITICAL_ITEMS].map((item) => [item, container.loot[item]])),
+    protectedLoot,
+  );
+  assert.equal(container.loot.chemical, undefined);
 });
 
 test('every generated world can fund the main objective plus an engineering reserve', () => {

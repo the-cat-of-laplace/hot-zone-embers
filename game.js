@@ -36,6 +36,7 @@ const ui = {
   safeObjective: document.querySelector('#objective-safe'),
   safeObjectiveText: document.querySelector('#objective-safe-text'),
   sampleObjective: document.querySelector('#objective-sample'),
+  sampleObjectiveText: document.querySelector('#objective-sample-text'),
   terminalObjective: document.querySelector('#objective-terminal'),
   tooltip: document.querySelector('#canvas-tooltip'),
   lootReveal: document.querySelector('#loot-reveal'),
@@ -60,6 +61,7 @@ const DAY_ZOMBIE_TARGET = 4;
 const NIGHT_ZOMBIE_TARGET = 28;
 const REQUIRED_FRONTLINE_SAFE_POINTS = 3;
 const REQUIRED_SAMPLES = 3;
+const MISSION_CRITICAL_ITEMS = new Set(['metal', 'filter', 'battery', 'sample']);
 const ENGINEERING_RESERVES = {
   metal: { minimum: 20, sources: ['快递箱', '工具箱', '军用箱', '警械柜', '燃料桶'] },
   filter: { minimum: 5, sources: ['医疗冷藏柜', '工具箱', '电子柜'] },
@@ -110,7 +112,7 @@ const ITEM_META = {
   battery: { label: '电池', glyph: '▣', weight: 1.2 },
   electronics: { label: '电子件', glyph: '⌘', weight: 0.2 },
   decoder: { label: '解码器', glyph: '⌘', weight: 0.7 },
-  sample: { label: '耐热株样本', glyph: '◇', weight: 0.2 },
+  sample: { label: '耐热株核心样本', glyph: '◇', weight: 0.2 },
   backpack: { label: '扩容背包', glyph: '▣', weight: 2.4, effect: '携带格 +4，负重上限 +8kg' },
   armor: { label: '防护背心', glyph: '⬟', weight: 3.4, effect: '每次丧尸接触伤害 -5' },
   weapon: { label: '加固近战武器', glyph: '⚒', weight: 2.1, effect: '近战伤害 +12' },
@@ -987,9 +989,11 @@ function openContainer(container, violent) {
   container.openedAt = performance.now();
   state.lootOpened += 1;
   if (violent && state.random() > 0.68) {
-    const damaged = Object.keys(container.loot).find((item) => container.loot[item] > 0);
+    const damaged = Object.keys(container.loot).find((item) => !MISSION_CRITICAL_ITEMS.has(item) && container.loot[item] > 0);
     if (damaged) takeItem(container.loot, damaged, 1);
-    logEvent(`${container.type}被撬开，但有一件物品被损坏。`, 'warn');
+    logEvent(damaged
+      ? `${container.type}被撬开，但有一件物品被损坏。`
+      : `${container.type}被撬开，核心样本保护匣承受了冲击。`, 'warn');
   } else {
     logEvent(`${container.type}已经打开。`, 'good');
   }
@@ -1434,7 +1438,7 @@ function describeObject(object, live) {
     return `${object.value.type} · ${object.value.lockTurns > 0 ? `锁定 ${object.value.lockTurns} 回合` : '可破解/可暴力拆解'}`;
   }
   if (object.kind === 'safe') return `${object.value.name} · ${object.value.active ? `已开辟，热屏障${object.value.radius}格，电力${Math.round(object.value.power)}%` : '候选设施，尚未通电'}`;
-  if (object.kind === 'terminal') return `区域热灭活终端 · ${state.terminalActivated ? '已启动' : '需要安全点和耐热株样本'}`;
+  if (object.kind === 'terminal') return `区域热灭活终端 · ${state.terminalActivated ? '已启动' : '需要安全点和耐热株核心样本'}`;
   return `${object.value.name} · ${live ? '实时可见' : '已探索记忆'}`;
 }
 
@@ -1854,9 +1858,11 @@ function updateUI() {
         return `<button class="stash-slot" data-stash-item="${item}" title="取出到背包：${meta.label}×1"><span>${meta.glyph}</span><small>${meta.label}${suffix}</small></button>`;
       }).join('')
       : '<div class="stash-empty">空</div>';
-  const safeDone = state.openedSafeCount >= REQUIRED_FRONTLINE_SAFE_POINTS; const sampleDone = totalSampleCount() >= REQUIRED_SAMPLES; const terminalDone = state.terminalActivated;
+  const sampleCount = totalSampleCount();
+  const safeDone = state.openedSafeCount >= REQUIRED_FRONTLINE_SAFE_POINTS; const sampleDone = sampleCount >= REQUIRED_SAMPLES; const terminalDone = state.terminalActivated;
   ui.safeObjective.classList.toggle('done', safeDone); ui.sampleObjective.classList.toggle('done', sampleDone); ui.terminalObjective.classList.toggle('done', terminalDone);
   ui.safeObjectiveText.textContent = `额外开辟前线安全点 ${Math.min(state.openedSafeCount, REQUIRED_FRONTLINE_SAFE_POINTS)} / ${REQUIRED_FRONTLINE_SAFE_POINTS}`;
+  ui.sampleObjectiveText.textContent = `取得耐热株核心样本 ${Math.min(sampleCount, REQUIRED_SAMPLES)} / ${REQUIRED_SAMPLES}`;
   ui.missionStep.textContent = `${[safeDone, sampleDone, terminalDone].filter(Boolean).length} / 3`;
   ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `额外修复三个热灭活节点，取得三份耐热株核心样本。当前压力：${state.pressure}。`;
   renderRecipes();
