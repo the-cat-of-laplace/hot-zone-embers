@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>热区余烬 | 末日搜打撤</title>
     <meta name="description" content="热区余烬：格子制末日搜打撤生存游戏" />
-    <link rel="stylesheet" href="./styles.css?v=loot-flow-v2" />
+    <link rel="stylesheet" href="./styles.css?v=expedition-v68" />
   </head>
   <body>
     <main class="app-shell">
@@ -19,11 +19,12 @@
             <span id="run-status">第1天 · 白天</span>
             <span class="status-dot" aria-hidden="true"></span>
             <span id="safe-status">热屏障稳定</span>
+            <button class="text-button" id="sound-toggle" type="button" title="切换音效">音效 开</button>
           </div>
         </header>
         <div class="canvas-frame" id="canvas-frame">
           <canvas id="game-canvas" aria-label="末日城市探索场景"></canvas>
-          <div class="canvas-hint" id="canvas-hint">WASD / 方向键移动 · 点击相邻格移动</div>
+          <div class="canvas-hint" id="canvas-hint">WASD 移动 · 方向键平移视角 · 点击相邻格移动</div>
           <div class="canvas-tooltip hidden" id="canvas-tooltip" role="status"></div>
           <section class="loot-reveal" id="loot-reveal" aria-live="polite" aria-label="附近物资" hidden>
             <div class="loot-reveal-heading">
@@ -38,25 +39,29 @@
           </section>
         </div>
         <div class="action-strip" id="action-strip">
-          <button class="action-button" data-action="inspect"><span class="action-glyph">⌕</span><span>调查</span><small>1回合</small></button>
-          <button class="action-button" data-action="quiet"><span class="action-glyph">♢</span><span>安静等待</span><small>1回合</small></button>
-          <button class="action-button" data-action="recenter" title="将视角回到玩家位置"><span class="action-glyph">◎</span><span>视角回正</span><small>镜头</small></button>
-          <button class="action-button" data-action="hack"><span class="action-glyph">⌘</span><span>正常破解</span><small>2回合</small></button>
-          <button class="action-button danger" data-action="brute"><span class="action-glyph">⚒</span><span>暴力拆解</span><small>1回合</small></button>
-          <button class="action-button combat" data-action="melee"><span class="action-glyph">✦</span><span>近战</span><small>1回合</small></button>
-          <button class="action-button combat" data-action="shoot"><span class="action-glyph">↗</span><span>射击</span><small>1回合</small></button>
-          <button class="action-button safe-only" data-action="store-selected"><span class="action-glyph">⇣</span><span>存入仓库</span><small>所选 · 1件</small></button>
-          <button class="action-button danger" data-action="discard-selected"><span class="action-glyph">×</span><span>丢弃物资</span><small>所选 · 1件</small></button>
-          <button class="action-button" data-action="drink"><span class="action-glyph">◌</span><span>饮水</span><small>1回合</small></button>
-          <button class="action-button" data-action="eat"><span class="action-glyph">▤</span><span>进食</span><small>1回合</small></button>
-          <button class="action-button" data-action="medkit"><span class="action-glyph">＋</span><span>治疗</span><small>即时</small></button>
-          <button class="action-button" data-action="use-adrenaline"><span class="action-glyph">▲</span><span>用肾上腺素</span><small>即时</small></button>
-          <button class="action-button" data-action="use-sedative"><span class="action-glyph">◆</span><span>用镇静针</span><small>即时</small></button>
-          <button class="action-button" data-action="use-coagulant"><span class="action-glyph">✚</span><span>用凝血针</span><small>即时</small></button>
-          <button class="action-button safe-only" data-action="activate"><span class="action-glyph">⚡</span><span>开辟安全点</span><small>3回合</small></button>
-          <button class="action-button safe-only" data-action="repair"><span class="action-glyph">⟳</span><span>修复热屏障</span><small>安全点</small></button>
-          <button class="action-button safe-only" data-action="rest"><span class="action-glyph">↻</span><span>睡觉到下一天</span><small>推进天数</small></button>
-          <button class="action-button safe-only" data-action="terminal"><span class="action-glyph">▣</span><span>启动终端</span><small>研究区</small></button>
+          <button class="action-button" data-action="inspect"><span class="action-glyph">查</span><span>调查</span><small>1回合</small></button>
+          <button class="action-button" data-action="search"><span class="action-glyph">搜</span><span>搜查</span><small>脚下尸体</small></button>
+          <button class="action-button" data-action="quiet"><span class="action-glyph">静</span><span>安静等待</span><small>1回合</small></button>
+          <button class="action-button" data-action="recenter" title="将视角回到玩家位置"><span class="action-glyph">回</span><span>视角回正</span><small>镜头</small></button>
+          <button class="action-button" data-action="map" title="打开城市地图"><span class="action-glyph">图</span><span>地图</span><small>M 键</small></button>
+          <button class="action-button" data-action="hack"><span class="action-glyph">破</span><span>正常破解</span><small>2回合</small></button>
+          <button class="action-button danger" data-action="brute"><span class="action-glyph">拆</span><span>暴力拆解</span><small>1回合</small></button>
+          <button class="action-button combat" data-action="melee"><span class="action-glyph">战</span><span>近战</span><small>1回合</small></button>
+          <button class="action-button combat" data-action="shoot"><span class="action-glyph">射</span><span>射击</span><small>1回合</small></button>
+          <button class="action-button safe-only" data-action="store-selected"><span class="action-glyph">存</span><span>存入仓库</span><small>所选 · 1件</small></button>
+          <button class="action-button danger" data-action="discard-selected"><span class="action-glyph">丢</span><span>丢弃物资</span><small>所选 · 1件</small></button>
+          <button class="action-button" data-action="wear-selected"><span class="action-glyph">穿</span><span>穿戴</span><small>所选装备</small></button>
+          <button class="action-button" data-action="drink"><span class="action-glyph">饮</span><span>饮水</span><small>1回合</small></button>
+          <button class="action-button" data-action="eat"><span class="action-glyph">食</span><span>进食</span><small>1回合</small></button>
+          <button class="action-button" data-action="medkit"><span class="action-glyph">疗</span><span>治疗</span><small>即时</small></button>
+          <button class="action-button" data-action="use-adrenaline"><span class="action-glyph">激</span><span>用肾上腺素</span><small>即时</small></button>
+          <button class="action-button" data-action="use-sedative"><span class="action-glyph">镇</span><span>用镇静针</span><small>即时</small></button>
+          <button class="action-button" data-action="use-coagulant"><span class="action-glyph">凝</span><span>用凝血针</span><small>即时</small></button>
+          <button class="action-button safe-only" data-action="activate"><span class="action-glyph">开</span><span>开辟安全点</span><small>3回合</small></button>
+          <button class="action-button safe-only" data-action="upgrade-safe"><span class="action-glyph">升</span><span>升级基地</span><small>设施</small></button>
+          <button class="action-button safe-only" data-action="repair"><span class="action-glyph">修</span><span>修复热屏障</span><small>安全点</small></button>
+          <button class="action-button safe-only" data-action="rest"><span class="action-glyph">睡</span><span>睡觉到下一天</span><small>推进天数</small></button>
+          <button class="action-button safe-only" data-action="terminal"><span class="action-glyph">启</span><span>启动终端</span><small>研究区</small></button>
         </div>
       </section>
 
@@ -64,7 +69,7 @@
         <section class="status-panel">
           <div class="panel-heading"><span>远征状态</span><span class="pressure-chip" id="pressure-chip">压力 1</span></div>
           <div class="status-grid">
-            <div><span>回合</span><strong id="turn-value">1 / 64</strong></div>
+            <div><span>回合</span><strong id="turn-value">1 / 72</strong></div>
             <div><span>天气</span><strong id="weather-value">晴</strong></div>
             <div><span>当前位置</span><strong id="location-value">初始隔离站</strong></div>
             <div><span>安全点</span><strong id="safe-count">1 / 6</strong></div>
@@ -79,6 +84,7 @@
         <div class="sidebar-tabs" role="tablist" aria-label="生存管理">
           <button class="sidebar-tab active" id="tab-inventory" role="tab" aria-selected="true" aria-controls="panel-inventory" data-sidebar-tab="inventory">物资</button>
           <button class="sidebar-tab" id="tab-craft" role="tab" aria-selected="false" aria-controls="panel-craft" data-sidebar-tab="craft">工作台</button>
+          <button class="sidebar-tab" id="tab-facility" role="tab" aria-selected="false" aria-controls="panel-facility" data-sidebar-tab="facility">设施</button>
           <button class="sidebar-tab" id="tab-mission" role="tab" aria-selected="false" aria-controls="panel-mission" data-sidebar-tab="mission">目标</button>
         </div>
 
@@ -97,11 +103,16 @@
             <div class="recipe-list" id="recipe-list"></div>
           </section>
 
+          <section class="facility-panel sidebar-panel" id="panel-facility" role="tabpanel" aria-labelledby="tab-facility" data-sidebar-panel="facility" hidden>
+            <div class="panel-heading"><span>安全点设施</span><span class="mission-step" id="facility-status">-</span></div>
+            <div id="facility-content"></div>
+          </section>
+
           <section class="mission-panel sidebar-panel" id="panel-mission" role="tabpanel" aria-labelledby="tab-mission" data-sidebar-panel="mission" hidden>
             <div class="panel-heading"><span>主线目标</span><span class="mission-step" id="mission-step">0 / 3</span></div>
-            <p id="mission-text">额外修复三个热灭活节点，取得三份耐热株核心样本。</p>
+            <p id="mission-text">额外修复五个热灭活节点，取得三份耐热株核心样本。</p>
             <div class="objective-list">
-              <div class="objective" id="objective-safe"><span class="objective-mark"></span><span id="objective-safe-text">额外开辟前线安全点 0 / 3</span></div>
+              <div class="objective" id="objective-safe"><span class="objective-mark"></span><span id="objective-safe-text">额外开辟前线安全点 0 / 5</span></div>
               <div class="objective" id="objective-sample"><span class="objective-mark"></span><span id="objective-sample-text">取得耐热株核心样本 0 / 3</span></div>
               <div class="objective" id="objective-terminal"><span class="objective-mark"></span><span>启动区域热灭活终端</span></div>
             </div>
@@ -120,6 +131,168 @@
       </aside>
     </main>
 
+    <div class="modal-layer hidden" id="expedition-modal">
+      <div class="end-modal" role="dialog" aria-modal="true" aria-labelledby="expedition-title">
+        <p class="eyebrow" id="expedition-eyebrow">EXPEDITION REPORT</p>
+        <h2 id="expedition-title">远征结算</h2>
+        <p id="expedition-copy"></p>
+        <div class="end-stats" id="expedition-stats"></div>
+        <button class="primary-button" id="expedition-close">继续行动</button>
+      </div>
+    </div>
+
+    <div class="modal-layer" id="title-screen">
+      <div class="title-card">
+        <p class="eyebrow">HOT ZONE / FIELD OPERATIONS</p>
+        <h1 class="title-h1">热区余烬</h1>
+        <p class="title-sub">热灭活协议失败了。城市被高温与变异株困住——重启热源网络，把最后三份耐热株核心样本带回终端。</p>
+        <div class="menu-buttons">
+          <button class="primary-button" id="start-button">开始远征</button>
+          <button class="secondary-button" id="guide-button">行动指南</button>
+        </div>
+        <p class="title-foot">永久死亡 · 无天数上限 · 每次出发都是同一座被困住的城市</p>
+      </div>
+    </div>
+
+    <div class="modal-layer hidden" id="guide-screen">
+      <div class="guide-card">
+        <div class="map-head">
+          <div>
+            <p class="eyebrow">FIELD MANUAL</p>
+            <h2>行动指南</h2>
+          </div>
+          <button class="primary-button map-close-button" id="guide-back">返回</button>
+        </div>
+        <div class="guide-body">
+          <section class="guide-section guide-prime">
+            <h3>基础规则</h3>
+            <ul>
+              <li>一天共 72 回合：第 1–44 回合为白天，第 45–52 回合为黄昏，第 53–72 回合为夜晚。夜间应在有电的安全点内睡觉以跳过整夜；在野外或断电设施内坚持到天亮者，黎明时将获得侦察机投下的装备补给。</li>
+              <li>噪声会吸引感染体，其中射击与暴力拆解产生的声音最大。</li>
+              <li>耐热株核心样本仅以随身背包中的数量为准；存放于仓库、留存于箱内或弃置于地面的样本均不计入终端启动条件。</li>
+            </ul>
+          </section>
+          <section class="guide-section">
+            <h3>任务目标</h3>
+            <table class="guide-table">
+              <tr><th>条件</th><th>要求</th></tr>
+              <tr><td>前线安全点</td><td>需额外开辟 <b>5 个</b>，初始隔离站不计入。</td></tr>
+              <tr><td>耐热株核心样本</td><td>需随身携带 <b>3 份</b>。实验室容器中保底生成 2 份，分置于两个不同的箱内；另有 25% 的耐热变异尸携带样本，搜查其尸体必可获得。</td></tr>
+              <tr><td>热灭活终端</td><td>位于地图东侧。启动后远征立即胜利，启动时消耗 3 份样本。</td></tr>
+            </table>
+          </section>
+          <section class="guide-section">
+            <h3>基本操作</h3>
+            <table class="guide-table">
+              <tr><th>操作</th><th>方式</th></tr>
+              <tr><td>移动</td><td>使用 WASD 键，或点击相邻格；每移动一格消耗 1 回合。</td></tr>
+              <tr><td>平移视角</td><td>使用方向键、按住拖拽或点击大地图定位；按 M 键或点击"地图"按钮打开大地图。</td></tr>
+              <tr><td>目标选择</td><td>点击感染体、容器或地面物资以选中；点击尸体将清除当前选择。</td></tr>
+              <tr><td>快捷行动</td><td>数字键 1 至 6 依次对应调查、破解、拆解、近战、射击、治疗。</td></tr>
+              <tr><td>物品使用</td><td>通过行动条按钮执行（饮水、进食、治疗、针剂）；数字键 6 执行治疗。</td></tr>
+              <tr><td>装备</td><td>点击背包中的装备以选中，再用行动条"穿戴"按钮装备至对应槽位（同槽换装时旧件放回背包）；点击已穿戴的装备可选中，再用行动条"卸下"或"丢弃"；槽位仅作展示，点击槽位无效果。卸下受背包容量与负重限制，超限时无法卸下。</td></tr>
+              <tr><td>仓库</td><td>各安全点仓库相互独立。选中物品后点击"存入仓库"（可连续点击）；点击仓库格取出 1 件。</td></tr>
+            </table>
+          </section>
+          <section class="guide-section">
+            <h3>生存状态</h3>
+            <table class="guide-table">
+              <tr><th>项目</th><th>数值</th></tr>
+              <tr><td>时间</td><td>每天 72 回合。</td></tr>
+              <tr><td>消耗</td><td>口渴在户外每回合下降 1 点、在建筑内下降 0.7 点；饥饿每回合下降 0.48 点。任一数值归零后，每回合损失 3 点生命。</td></tr>
+              <tr><td>净水</td><td>口渴恢复 32 点；装备水壶恢复 48 点，装备保温水壶恢复 56 点。</td></tr>
+              <tr><td>口粮 / 绷带</td><td>口粮使饥饿恢复 28 点；绷带使生命恢复 30 点。</td></tr>
+              <tr><td>压力</td><td>每 4 天提升 1 级，最高 5 级；压力影响尸群规模与破解成功率。</td></tr>
+            </table>
+          </section>
+          <section class="guide-section">
+            <h3>夜间机制</h3>
+            <table class="guide-table">
+              <tr><th>项目</th><th>数值</th></tr>
+              <tr><td>时长</td><td>第 53–72 回合，共 20 回合；入夜时一次性涌入约 35% 的夜间尸群。</td></tr>
+              <tr><td>视野</td><td>比白天减少 2 格（晴夜 3 格、雨夜 2 格、雾夜 2 格）；装备夜视镜增加 1 格；月相再调整 1 格。</td></tr>
+              <tr><td>月相</td><td>晴月视野增加 1 格；薄云无调整；黑月视野减少 1 格，并使热源强度乘以 1.3。</td></tr>
+              <tr><td>热源噪声</td><td>每回合在玩家所在格生成并随玩家移动，基础强度 9；隔热斗篷与伪装披风可将其<b>完全消除</b>。</td></tr>
+              <tr><td>锁定</td><td>距离 6 格以内的感染体无条件追踪（隔热斗篷 4 格、伪装披风 3 格）；已锁定的感染体接近至 2 格内时发出强度 12 的咆哮，将周围感染体引向咆哮位置。</td></tr>
+              <tr><td>补员</td><td>每回合补充 3–4 只，生成于玩家 7–13 格环带内。</td></tr>
+              <tr><td>过夜</td><td>在有电安全点内睡觉安全且恢复生命；在野外或断电设施内坚持到天亮，可获得侦察机投下的必含装备的补给。</td></tr>
+            </table>
+            <p class="guide-note">热源与锁定为两层机制：6 格以内必然追击，6–9 格按噪声三环规则概率围拢（外环 60%）。枪声等更强噪声会覆盖体温，成为新的声源。无遮蔽者同时受热源与锁定围拢，装备与潜行流派的价值主要体现在夜间。</p>
+          </section>
+          <section class="guide-section">
+            <h3>噪声与感染体</h3>
+            <table class="guide-table">
+              <tr><th>行动</th><th>噪声</th><th>行动</th><th>噪声</th></tr>
+              <tr><td>破解</td><td>1</td><td>近战</td><td>3</td></tr>
+              <tr><td>搜查尸体</td><td>2</td><td>开辟安全点</td><td>8</td></tr>
+              <tr><td>暴力拆解</td><td>10</td><td>射击</td><td>18（消音器 7，制退器 24）</td></tr>
+            </table>
+            <p class="guide-note">噪声以声源为圆心分三环扩散：近环内的感染体直奔声源，中环内的前进一步，外环内的以 60% 概率趋近；感染体聆听当前场上最强的噪声。锁定距离为 6 格（隔热斗篷 4 格、伪装披风 3 格）。</p>
+            <table class="guide-table">
+              <tr><th>类型</th><th>生命</th><th>接触伤害</th><th>特性</th></tr>
+              <tr><td>普通夜行尸</td><td>52</td><td>8</td><td>白天休眠，夜间活动。</td></tr>
+              <tr><td>耐热变异尸</td><td>74</td><td>13</td><td>白天仍然活跃；25% 携带样本。</td></tr>
+              <tr><td>尖啸尸</td><td>52</td><td>8</td><td>攻击时可能发出尖啸。</td></tr>
+              <tr><td>重甲尸</td><td>130</td><td>19</td><td>生命与接触伤害最高。</td></tr>
+            </table>
+          </section>
+          <section class="guide-section">
+            <h3>战斗与搜集</h3>
+            <table class="guide-table">
+              <tr><th>项目</th><th>数值</th></tr>
+              <tr><td>近战</td><td>基础伤害 28；随身金属超过 4 件时增加 4；装备加固武器增加 12，装备消防斧增加 20；消耗 1 回合。</td></tr>
+              <tr><td>射击</td><td>对普通、耐热与尖啸尸造成 58 点伤害，对重甲尸造成 38 点；制退器增加 15 点；目标须在视野内且距离不超过 8 格，每次消耗 1 发弹药。</td></tr>
+              <tr><td>减伤</td><td>防护背心减少 5 点接触伤害，轻量插板减少 3 点，防爆头盔减少 3 点（三者可叠加），凝血针再减少 8 点。</td></tr>
+              <tr><td>破解</td><td>消耗 2 回合；成功率 = 74% − 压力×3.5% + 解码器 13% + 工具腰带 10%，区间为 35%–92%。</td></tr>
+              <tr><td>拆解</td><td>消耗 1 回合；约 32% 概率损坏一件非关键物品。</td></tr>
+              <tr><td>尸体</td><td>击杀不掉落物品；站到尸体所在格后执行"搜查"，消耗 1 回合并产生 2 点噪声。</td></tr>
+            </table>
+          </section>
+          <section class="guide-section">
+            <h3>装备</h3>
+            <table class="guide-table">
+              <tr><th>槽位</th><th>A</th><th>B</th></tr>
+              <tr><td>背部</td><td>扩容背包：携带格 +4，负重上限 +8kg</td><td>重装背包：携带格 +8，负重上限 +16kg</td></tr>
+              <tr><td>防具</td><td>防护背心：接触伤害 -5</td><td>轻量插板：接触伤害 -3（重量较轻）</td></tr>
+              <tr><td>近战</td><td>加固武器：近战伤害 +12</td><td>消防斧：近战伤害 +20</td></tr>
+              <tr><td>枪口</td><td>抑制器：射击噪声 18→7</td><td>制退器：射击伤害 +15，噪声 18→24</td></tr>
+              <tr><td>头部</td><td>夜视镜：夜晚视野 +1</td><td>防爆头盔：接触伤害 -3</td></tr>
+              <tr><td>披风</td><td>隔热斗篷：热源归零，锁定 4 格</td><td>伪装披风：热源归零，锁定 3 格</td></tr>
+              <tr><td>腰带</td><td>战术腰带：携带格 +2</td><td>工具腰带：携带格 +2，破解成功率 +10%</td></tr>
+              <tr><td>水具</td><td>水壶：饮水恢复 48</td><td>保温水壶：饮水恢复 56</td></tr>
+            </table>
+            <p class="guide-note">全图保底 2 件装备散落于箱中；全部 16 种装备均可制作。</p>
+          </section>
+          <section class="guide-section">
+            <h3>安全点设施</h3>
+            <table class="guide-table">
+              <tr><th>项目</th><th>数值</th></tr>
+              <tr><td>开辟</td><td>随身携带金属×6、滤芯×1、电池×1，连续执行 3 回合；离开或跨日则进度清零，材料不返还。</td></tr>
+              <tr><td>维修</td><td>消耗该站仓库金属×4、滤芯×1、电池×1，耗时 2 回合，恢复 36 点电力。</td></tr>
+              <tr><td>升级</td><td>各站独立：Lv2 屏障半径扩至 3 格；Lv3 自动防卫（每回合灼烧外围感染体 8 点）；Lv4 净水循环（每日为该站仓库增加 2 瓶净水）。</td></tr>
+              <tr><td>清晨回充</td><td>有电站点每日恢复 8×等级 % 的电力（如 Lv2 恢复 16%）；断电后需手动维修。</td></tr>
+              <tr><td>睡眠</td><td>需在有电安全点内执行；电力成本为 6 加已开辟站点数；恢复 12 点生命。</td></tr>
+              <tr><td>空投</td><td>第 3 天起、且已开辟至少 1 个前线站后开始投送；野外过夜奖励必含装备。</td></tr>
+            </table>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-layer hidden" id="map-modal">
+      <div class="map-modal" role="dialog" aria-modal="true" aria-labelledby="map-title">
+        <div class="map-head">
+          <div>
+            <p class="eyebrow">CITY GRID / 城市总览</p>
+            <h2 id="map-title">街区地图</h2>
+          </div>
+          <button class="primary-button map-close-button" id="map-close">关闭地图</button>
+        </div>
+        <canvas id="map-canvas" aria-label="城市地图"></canvas>
+        <div class="map-foot">点击地图移动视角 · 未探索区域保持黑暗 · M 键或"地图"按钮开关</div>
+      </div>
+    </div>
+
     <div class="modal-layer hidden" id="end-modal">
       <div class="end-modal" role="dialog" aria-modal="true" aria-labelledby="end-title">
         <p class="eyebrow" id="end-eyebrow">RUN ENDED</p>
@@ -130,6 +303,6 @@
       </div>
     </div>
 
-    <script type="module" src="./game.js?v=resource-balance-v2"></script>
+    <script type="module" src="./game.js?v=expedition-v68"></script>
   </body>
 </html>
