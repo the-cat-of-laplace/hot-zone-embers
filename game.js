@@ -982,8 +982,8 @@ function carrySlotCapacity() { return carryCapacityWith(state.equipment).slots; 
 function carryWeightCapacity() { return carryCapacityWith(state.equipment).weight; }
 function currentStash() { return state.stashes[state.currentSafeId] || {}; }
 function totalSampleCount() {
-  return itemCount(state.inventory, 'sample')
-    + Object.values(state.stashes).reduce((total, stash) => total + itemCount(stash, 'sample'), 0);
+  // Mission progress mirrors the terminal: samples only count while carried.
+  return itemCount(state.inventory, 'sample');
 }
 
 function canCarryItem(item) {
@@ -1457,7 +1457,6 @@ function updateZombies(zombieAction = null) {
     if (!best) return event;
     return noisePropagationRadius(event) > noisePropagationRadius(best) ? event : best;
   }, null);
-  const playerSafe = poweredSafeAt(playerPoint);
   for (const zombie of state.zombies) {
     if (!isActiveZombie(zombie)) continue;
     if (zombieAction?.has(zombie.id)) continue;
@@ -1471,9 +1470,14 @@ function updateZombies(zombieAction = null) {
         logEvent('接敌的咆哮在冷夜里回荡，整条街都听见了。', 'danger');
       }
     }
-    if (playerSafe && squareDistance(zombie, playerSafe) <= playerSafe.radius + 2) {
+    // Every powered safe point maintains its barrier even when the player is
+    // elsewhere. If barrier ranges overlap, use the nearest station.
+    const repellingSafe = state.safePoints
+      .filter((safe) => safe.active && safe.power > 0 && squareDistance(zombie, safe) <= safe.radius + 2)
+      .sort((a, b) => squareDistance(zombie, a) - squareDistance(zombie, b))[0];
+    if (repellingSafe) {
       zombie.state = 'perimeter';
-      stepZombieAway(zombie, playerSafe);
+      stepZombieAway(zombie, repellingSafe);
       zombie.cooldown = Math.max(zombie.cooldown, 1);
       zombieAction?.add(zombie.id);
       continue;

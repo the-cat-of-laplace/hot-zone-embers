@@ -575,6 +575,28 @@ test('zero-power safe point is a usable facility but not a protective barrier', 
   assert.equal(game.poweredSafeAt(state.player), safe);
 });
 
+test('a newly activated powered safe point keeps repelling zombies after the player leaves', () => {
+  const game = createGame();
+  const safe = { id: 1, name: '前线站', x: 5, y: 5, active: false, radius: 0, power: 0, level: 0 };
+  const zombie = { id: 'z', x: 7, y: 5, type: 'common', hp: 52, dead: false, dormant: false, state: 'wander', cooldown: 0 };
+  const state = makeState({
+    inventory: { metal: 6, filter: 1, battery: 1 },
+    safePoints: [safe],
+    stashes: {},
+  });
+  game.setState(state);
+  game.activateSafePoint();
+  game.activateSafePoint();
+  game.activateSafePoint();
+  assert.equal(safe.active, true);
+  assert.equal(safe.power, 74);
+  game.setPlayerPosition(30, 30);
+  state.zombies = [zombie];
+  game.updateZombies(new Set());
+  assert.deepEqual({ x: zombie.x, y: zombie.y }, { x: 8, y: 5 });
+  assert.equal(zombie.state, 'perimeter');
+});
+
 test('sleep requires enough power for the full overnight cost', () => {
   const game = createGame();
   const safe = { id: 0, name: '低电站', x: 5, y: 5, active: true, radius: 2, power: 6, level: 1, stash: {} };
@@ -647,6 +669,15 @@ test('the terminal needs the samples on the player, not in a stash', () => {
   game.activateTerminal();
   assert.equal(state.mode, 'won');
   assert.equal(state.inventory.sample || 0, 0); // the terminal consumes them
+});
+
+test('mission sample progress only counts samples carried by the player', () => {
+  const game = createGame();
+  const stash = game.emptyStash();
+  stash.sample = 3;
+  const state = makeState({ inventory: { sample: 1 }, stashes: { 0: stash } });
+  game.setState(state);
+  assert.equal(game.totalSampleCount(), 1);
 });
 
 test('a lethal response after a killing shot does not move the dead player or add victory logs', () => {
