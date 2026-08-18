@@ -1,0 +1,14 @@
+# Local publishing and download helpers
+/一键提交到GitHub.bat
+/assets/*.url
+/assets/素材下载说明.txt
+
+# Source-art variants not used by the current game
+/assets/emblem.svg
+/assets/logo.svg
+/assets/Top_Down_Survivor/feet/
+/assets/Top_Down_Survivor/flashlight/
+/assets/Top_Down_Survivor/handgun/
+/assets/Top_Down_Survivor/knife/
+/assets/Top_Down_Survivor/shotgun/
+/assets/Top_Down_Survivor/rifle/reload/

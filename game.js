@@ -431,6 +431,40 @@ const canvasState = { width: 0, height: 0, dpr: 1, pointer: null, dragging: fals
 let state = null;
 // The title menu blocks all game input until the player presses start.
 let menuOpen = true;
+// Top Down Survivor frames face east; rotate the canvas for the active aim.
+const SURVIVOR_SPRITE_ROOT = './assets/Top_Down_Survivor/rifle';
+const survivorSprites = {
+  initialized: false,
+  total: 0,
+  ready: 0,
+  images: { idle: [], move: [], melee: [], shoot: [] },
+};
+
+function initSurvivorSprites() {
+  if (survivorSprites.initialized || typeof Image === 'undefined') return;
+  survivorSprites.initialized = true;
+  const sets = [
+    { key: 'idle', directory: 'idle', stem: 'survivor-idle_rifle_', frames: 20 },
+    { key: 'move', directory: 'move', stem: 'survivor-move_rifle_', frames: 20 },
+    { key: 'melee', directory: 'meleeattack', stem: 'survivor-meleeattack_rifle_', frames: 15 },
+    { key: 'shoot', directory: 'shoot', stem: 'survivor-shoot_rifle_', frames: 3 },
+  ];
+  sets.forEach((set) => {
+    for (let index = 0; index < set.frames; index += 1) {
+      const image = new Image();
+      image.onload = () => {
+        survivorSprites.ready += 1;
+      };
+      image.onerror = () => {
+        survivorSprites.total = Math.max(0, survivorSprites.total - 1);
+      };
+      image.src = `${SURVIVOR_SPRITE_ROOT}/${set.directory}/${set.stem}${index}.png`;
+      survivorSprites.images[set.key].push(image);
+      survivorSprites.total += 1;
+    }
+  });
+}
+
 
 // ── Procedural audio ─────────────────────────────────────────────────────
 // All sound effects are synthesized at runtime with Web Audio: no asset files,
@@ -631,7 +665,7 @@ function resetGame() {
     health: 100,
     thirst: 86,
     hunger: 90,
-    buffs: { noiseScale: null, contactShield: 0 },
+    buffs: { noiseScale: null, noiseScaleQueue: [], contactShield: 0 },
     kills: 0,
     lootOpened: 0,
     openedSafeCount: 0,
@@ -657,6 +691,7 @@ function resetGame() {
     trodden: new Set(),
     logs: [],
     noiseEvents: [],
+      fx: [],
     safePoints: SAFE_TEMPLATES.map(cloneSafe),
     buildings: BUILDING_TEMPLATES.map((building, index) => ({ ...building, id: index })),
     containers: [],
@@ -724,12 +759,12 @@ function guaranteeEngineeringResources() {
 
 // Two of the three required samples are always sealed in the northern lab
 // containers — scattered across two different crates, never stacked in one.
-// The third must be stripped from a heat-resistant corpse, and the first
-// hunter searched carries a pity guarantee, so the mission can never become
-// unwinnable.
+// The third must be stripped from a heat-resistant corpse. Later spawns
+// maintain the living-carrier quota; the first hunter is not forced to carry.
+// Two guaranteed lab samples plus the hunter quota keep the run winnable.
 const GUARANTEED_SAMPLES = 2;
-// Exactly a quarter of the living hunter population carries the strain:
-// the quota is maintained at spawn time, so it holds for every total count.
+// Roughly a quarter of the living hunter population carries the strain:
+// spawns backfill the quota, but the very first hunter is randomized.
 const HUNTER_STRAIN_RATIO = 0.25;
 
 function guaranteeMissionSamples() {
@@ -880,6 +915,14 @@ function distanceBeyondNearestSafe(point) {
 }
 
 function buildingAt(x, y) { return state.buildings.find((building) => x >= building.x && x < building.x + building.w && y >= building.y && y < building.y + building.h); }
+  function buildingVisited(building) {
+    for (let y = building.y; y < building.y + building.h; y += 1) {
+      for (let x = building.x; x < building.x + building.w; x += 1) {
+        if (state.visited.has(key(x, y))) return true;
+      }
+    }
+    return false;
+  }
 function insideBuilding(point) { return Boolean(buildingAt(point.x, point.y)); }
 function squareDistance(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
 function safeFacilityAt(point) { return state.safePoints.find((safe) => safe.active && squareDistance(point, safe) <= safe.radius); }
@@ -923,6 +966,10 @@ function selectTarget(kind, target) {
   if (kind !== 'container' && kind !== 'groundLoot') state.lootReveal = null;
   if (!target) return;
   if (kind === 'zombie') logEvent(`已选中${zombieLabel(target)}。靠近后可以近战，视野内也可以射击。`, 'warn');
+    if (kind === 'zombie') {
+      state.player.aimAngle = Math.atan2(target.y - state.player.y, target.x - state.player.x);
+      state.player.aimLocked = true;
+    }
   if (kind === 'container') logEvent(target.status === 'open'
     ? `已选中${target.type}。靠近后可以拾取剩余物资。`
     : `已选中${target.type}。靠近后可以破解或暴力拆解。`);
@@ -1081,7 +1128,9 @@ function lootOne(kind, id, item) {
 
 function addNoise(intensity, label = '声响') {
   if (intensity <= 0) return;
-  if (state.buffs?.noiseScale != null) {
+  if (state.buffs?.noiseScaleQueue?.length) {
+      intensity = Math.max(0, Math.round(intensity * state.buffs.noiseScaleQueue.shift()));
+    } else if (state.buffs?.noiseScale != null) {
     intensity = Math.max(0, Math.round(intensity * state.buffs.noiseScale));
     state.buffs.noiseScale = null;
   }
@@ -1168,14 +1217,16 @@ function movePlayer(dx, dy) {
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
   if (!isPlayerWalkable(nx, ny)) {
-    logEvent('前方被废墟、积水或感染体挡住了。');
+    logEvent('前方被感染体或地图边界挡住了。');
     return;
   }
   setPlayerPosition(nx, ny);
   state.lootReveal = null;
   state.player.facing = dy < 0 ? 'n' : dy > 0 ? 's' : dx < 0 ? 'w' : 'e';
+    state.player.aimLocked = false;
+    state.player.lastMoveAt = performance.now();
   visitAroundPlayer();
-  advanceTurns(1, Math.max(0, state.inventory.heavy ? 2 : 0));
+  advanceTurns(1, 0);
   if (state.mode !== 'field') return;
   const safe = poweredSafeAt(state.player);
   const facility = safeFacilityAt(state.player);
@@ -1205,7 +1256,7 @@ function enterSafeZone(safe) {
 
 function isWalkable(x, y) {
   if (x < 0 || x >= WORLD_W || y < 0 || y >= WORLD_H) return false;
-  return state.terrain[y][x] !== 'water';
+  return true; // terrain is visual only; no impassable terrain remains
 }
 
 function isPlayerWalkable(x, y) {
@@ -1236,7 +1287,7 @@ function advanceTurns(cost = 1, noise = 0) {
     state.hunger = clamp(state.hunger - 0.48, 0, 100);
     state.containers.forEach((container) => { if (container.lockTurns > 0) container.lockTurns -= 1; });
     state.noiseEvents.forEach((event) => { event.ttl -= 1; });
-    state.noiseEvents = state.noiseEvents.filter((event) => event.ttl > 0);
+    // Noise expiry happens after updateZombies below, so a ttl=0 event is still audible this turn.
     const nightBegins = state.turn === 53;
     if (state.turn === 45) logEvent('气温开始下降。高温压制正在减弱，夜行感染体即将复苏。', 'warn');
     if (nightBegins) {
@@ -1245,6 +1296,8 @@ function advanceTurns(cost = 1, noise = 0) {
       logEvent(`夜幕降临。蛰伏的感染体同时苏醒，尸群涌入街区。今晚是${moon.name}。`, 'danger');
     }
     updateZombies(zombieAction);
+      state.noiseEvents = state.noiseEvents.filter((event) => event.ttl > 0);
+      // Expired events are removed only after the zombie phase has had its final listen.
     if (state.mode !== 'field') return;
     if (nightBegins) {
       wakeNightZombies();
@@ -1317,11 +1370,11 @@ function spawnOne({ night = isNight(), minDistance = night ? 3 : 7, allowVisible
     if (!allowVisible && visibleAt(point.x, point.y)) continue;
     if (!zombieWalkable(point.x, point.y)) continue;
     const type = night ? rollNightZombieType() : HEAT_RESISTANT_TYPE;
-    // Maintain the strain quota: a quarter of all living hunters are carriers.
+    // Maintain the strain quota; the first hunter is random instead of forced.
     let carriesSample = false;
     if (type === HEAT_RESISTANT_TYPE) {
       state.hunterCount += 1;
-      carriesSample = state.hunterCarriers < Math.ceil(state.hunterCount * HUNTER_STRAIN_RATIO);
+      carriesSample = state.hunterCarriers < Math.ceil(state.hunterCount * HUNTER_STRAIN_RATIO) && (state.hunterCount > 1 || state.random() < HUNTER_STRAIN_RATIO);
       if (carriesSample) state.hunterCarriers += 1;
     }
     state.zombies.push({ id: `${state.day}-${state.turn}-${state.zombies.length}`, ...point, type, hp: type === 'brute' ? 130 : type === 'hunter' ? 74 : 52, state: 'wander', cooldown: 0, seen: false, rx: point.x, ry: point.y, carriesSample });
@@ -1494,15 +1547,18 @@ function updateZombies(zombieAction = null) {
         const baseDamage = zombie.type === 'brute' ? 19 : zombie.type === 'hunter' ? 13 : 8;
         const shieldReduction = state.buffs?.contactShield ? 8 : 0;
         const damage = Math.max(1, baseDamage - (equipped('armor') ? 5 : 0) - (equipped('armorLite') ? 3 : 0) - (equipped('helmet') ? 3 : 0) - shieldReduction);
-        if (state.buffs?.contactShield) state.buffs.contactShield = 0;
+        if (state.buffs?.contactShield) state.buffs.contactShield -= 1;
         state.health -= damage;
         state.expedition.damage += damage;
         state.dayStats.damage += damage;
         state.hitFlash = 1;
         state.shake = { at: performance.now(), power: 2 };
+          addBattleFx('claw', state.player.x, state.player.y, {});
+            state.player.actionPose = 'hurt';
+            state.player.actionUntil = performance.now() + 420;
         playSfx('hurt');
         logEvent(`${zombieLabel(zombie)}扑向你，造成${damage}点伤势。`, 'danger');
-        if (zombie.type === 'screamer' && state.random() > 0.48) addNoise(9, '尖啸');
+        if (zombie.type === 'screamer' && state.random() > 0.48) addNoiseAt(zombie.x, zombie.y, 9, '尖啸');
         if (state.health <= 0) {
           endRun('dead', '你被尸群拖入了黑暗。');
           return;
@@ -1688,7 +1744,7 @@ function drawMap() {
     }
   }
   state.buildings.forEach((building) => {
-    if (!state.visited.has(key(building.x, building.y))) return;
+    if (!buildingVisited(building)) return;
     const style = ZONE_STYLES[building.zone];
     mapCtx.fillStyle = style.wall;
     mapCtx.fillRect(building.x * MAP_TILE, building.y * MAP_TILE, building.w * MAP_TILE, building.h * MAP_TILE);
@@ -1717,7 +1773,7 @@ function drawMap() {
   mapCtx.fillStyle = '#8fbdb3';
   mapCtx.font = '8px Segoe UI, Microsoft YaHei, sans-serif';
   mapCtx.fillText('热灭活终端', tx + MAP_TILE + 3, ty + 9);
-  state.containers.filter((container) => container.type === '补给空投' && containerHasLoot(container)).forEach((container) => {
+  state.containers.filter((container) => container.type === '补给空投' && containerHasLoot(container) && (state.visited.has(key(container.x, container.y)) || visibleAt(container.x, container.y))).forEach((container) => {
     mapCtx.fillStyle = '#f0c17a';
     mapCtx.fillRect(container.x * MAP_TILE + 3, container.y * MAP_TILE + 3, 4, 4);
   });
@@ -1838,11 +1894,21 @@ function melee() {
   if (!zombie) { logEvent('近战范围内没有目标。'); return; }
   if (!adjacent(zombie, state.player) && manhattan(zombie, state.player) !== 0) { logEvent('你还没有靠近这个丧尸。', 'warn'); return; }
   const attackCell = { x: zombie.x, y: zombie.y };
+    const meleeDx = zombie.x - state.player.x;
+    const meleeDy = zombie.y - state.player.y;
+    if (Math.abs(meleeDx) >= Math.abs(meleeDy)) state.player.facing = meleeDx < 0 ? 'w' : 'e';
+    else state.player.facing = meleeDy < 0 ? 'n' : 's';
+    state.player.aimAngle = Math.atan2(meleeDy, meleeDx);
+    state.player.aimUntil = performance.now() + 560;
+    state.player.aimLocked = true;
   const damage = 28 + (itemCount(state.inventory, 'metal') > 4 ? 4 : 0) + (equipped('weapon') ? 12 : 0) + (equipped('axe') ? 20 : 0);
   zombie.hp -= damage;
   state.shake = { at: performance.now(), power: 2 };
   playSfx('melee');
+    state.player.actionPose = 'melee';
+    state.player.actionUntil = performance.now() + 520;
   const killed = settleZombieDeath(zombie);
+    addBattleFx('impact', zombie.x, zombie.y, { power: killed ? 6 : 3 });
   advanceTurns(1, 3);
   if (state.mode !== 'field') return;
   if (killed) {
@@ -1856,6 +1922,10 @@ function melee() {
 function shoot() {
   const zombie = selectedZombie() || visibleZombie(8);
   if (!zombie) { logEvent('视野内没有可射击的目标。'); return; }
+    if (!visibleAt(zombie.x, zombie.y) || dist(zombie, state.player) > 8) {
+      logEvent('目标不在实时视野内或超过8格射程。', 'warn');
+      return;
+    }
   if (!takeItem(state.inventory, 'ammo', 1)) { logEvent('没有弹药。'); return; }
   // Remember the firing distance before the zombie phase. A remote shot must
   // never become a melee-style displacement just because the target moved
@@ -1864,10 +1934,21 @@ function shoot() {
   const shotTargetCell = { x: zombie.x, y: zombie.y };
   const damage = (zombie.type === 'brute' ? 38 : 58) + (equipped('muzzleBrake') ? 15 : 0);
   const suppressed = equipped('suppressor');
+    const aimDx = zombie.x - state.player.x;
+    const aimDy = zombie.y - state.player.y;
+    if (Math.abs(aimDx) >= Math.abs(aimDy)) state.player.facing = aimDx < 0 ? 'w' : 'e';
+    else state.player.facing = aimDy < 0 ? 'n' : 's';
+    state.player.aimAngle = Math.atan2(aimDy, aimDx);
+    state.player.aimUntil = performance.now() + 520;
+    state.player.aimLocked = true;
   zombie.hp -= damage;
   const killed = settleZombieDeath(zombie);
   state.shake = { at: performance.now(), power: suppressed ? 3 : equipped('muzzleBrake') ? 8 : 6 };
   playSfx('shoot', suppressed ? 'suppressed' : equipped('muzzleBrake') ? 'heavy' : 'loud');
+    state.player.actionPose = 'shoot';
+    state.player.actionUntil = performance.now() + 480;
+    addBattleFx('muzzle', state.player.x, state.player.y, { angle: state.player.aimAngle, power: suppressed ? 2 : equipped('muzzleBrake') ? 6 : 4 });
+    addBattleFx('impact', zombie.x, zombie.y, { power: killed ? 5 : 3 });
   advanceTurns(1, suppressed ? 7 : equipped('muzzleBrake') ? 24 : 18);
   if (state.mode !== 'field') return;
   if (killed) {
@@ -1894,6 +1975,7 @@ function settleZombieDeath(zombie) {
   playSfx('zombieDeath');
   zombie.corpseTTL = Infinity;
   if (state.selectedTarget?.kind === 'zombie' && state.selectedTarget.id === zombie.id) state.selectedTarget = null;
+    addBattleFx('blood', zombie.x, zombie.y, { power: zombie.type === 'brute' ? 2 : 1 });
   // The loot stays inside the body: step onto its tile and search it instead.
   return true;
 }
@@ -1946,13 +2028,15 @@ function useInjection(item) {
   if (!takeItem(state.inventory, item, 1)) { logEvent(`没有可用的${ITEM_META[item]?.label || item}。`); return; }
   if (item === 'adrenaline') {
     state.health = clamp(state.health + 8, 0, 100);
-    state.buffs.noiseScale = 0;
+    if (!state.buffs.noiseScaleQueue) state.buffs.noiseScaleQueue = [];
+      state.buffs.noiseScaleQueue.push(0);
     logEvent('肾上腺素起效：恢复8生命，下一次有声行动不会扩散噪声。', 'good');
   } else if (item === 'sedative') {
-    state.buffs.noiseScale = 0.45;
+    if (!state.buffs.noiseScaleQueue) state.buffs.noiseScaleQueue = [];
+      state.buffs.noiseScaleQueue.push(0.45);
     logEvent('镇静针剂起效：下一次有声行动的传播强度降低。', 'good');
   } else if (item === 'coagulant') {
-    state.buffs.contactShield = 1;
+    state.buffs.contactShield = (state.buffs.contactShield || 0) + 1;
     logEvent('凝血针剂起效：下一次接触伤害降低8点。', 'good');
   }
   playSfx('use');
@@ -2046,6 +2130,7 @@ function craftDecoder() { return craftRecipe('craft-decoder'); }
 function repairSafePoint() {
   const safe = safeFacilityAt(state.player);
   if (!safe) { logEvent('需要站在安全点内修复热屏障。'); return; }
+    if (safe.power >= 120) { logEvent(`${safe.name}的热屏障已经处于满功率，无需维修。`, 'warn'); return; }
   state.currentSafeId = safe.id;
   const stash = currentStash();
   const fullCost = Object.entries(REPAIR_COST).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、');
@@ -2135,11 +2220,16 @@ function startNextDay({ slept = false, fieldNight = false } = {}) {
   // The resupply line needs a foothold to home in on: drops only begin once
   // a frontline safe point is online, and never before the third dawn.
   state.nextAirdropTurn = state.day >= 3 && state.openedSafeCount > 0 ? 5 + Math.floor(state.random() * 5) : 0;
+    // Clear last night's noise before any dawn reward lands, so the crate's
+    // own landing noise survives into the new day and can attract hunters.
+    state.noiseEvents = [];
   // Surviving a night out in the open is a deliberate risk: the reward is a
   // premium reconnaissance drop near the player at dawn.
   if (fieldNight) {
-    spawnNightSurvivalAirdrop();
-    logEvent('侦察机注意到你在街区里熬过了夜晚，在你附近投下了特殊补给。', 'good');
+    const survivalDropDelivered = spawnNightSurvivalAirdrop();
+    logEvent(survivalDropDelivered
+        ? '侦察机注意到你在街区里熬过了夜晚，在你附近投下了特殊补给。'
+        : '侦察机飞过街区，但未能找到安全投放点，补给未能落下。', survivalDropDelivered ? 'good' : 'warn');
   }
   // Level-4 water recyclers refill their own stashes every dawn.
   const harvesters = state.safePoints.filter((safe) => safe.active && safe.level >= 4 && safe.stash);
@@ -2164,7 +2254,9 @@ function startNextDay({ slept = false, fieldNight = false } = {}) {
     state.selectedTarget = null;
   }
   state.activation = null;
+    if (!fieldNight) {
   state.noiseEvents = [];
+    }
   // Ordinary night infections hibernate at dawn; every live entity and corpse remains in the world.
   spawnZombies(false);
   visitAroundPlayer();
@@ -2486,30 +2578,32 @@ function screenToWorld(x, y, cam = camera()) { return { x: Math.floor((x + cam.x
 
 function draw() {
   if (!state) return;
-  if (state.mapOpen) drawMap();
+  if (state.mapOpen) drawMapWasteland();
   ctx.setTransform(canvasState.dpr, 0, 0, canvasState.dpr, 0, 0);
   ctx.clearRect(0, 0, canvasState.width, canvasState.height);
   const cam = camera();
   ctx.fillStyle = '#090e0e';
   ctx.fillRect(0, 0, canvasState.width, canvasState.height);
-  drawTerrain(cam);
+  drawTerrainWasteland(cam);
   drawZoneLabels(cam);
-  state.buildings.forEach((building) => drawBuilding(building, cam));
-  state.safePoints.forEach((safe) => drawSafePoint(safe, cam));
-  drawContainers(cam);
-  drawGroundLoot(cam);
-  drawTerminal(cam);
+  state.buildings.forEach((building) => drawBuildingWasteland(building, cam));
+  state.safePoints.forEach((safe) => drawSafePointWasteland(safe, cam));
+  drawContainersWasteland(cam);
+  drawGroundLootWasteland(cam);
+  drawTerminalWasteland(cam);
   drawExplorationLayers(cam);
-  drawNoise(cam);
+  drawNoiseWasteland(cam);
   // Live zombies are real-time information; corpses are persistent map memory
   // and remain visible on explored cells even after the player leaves. Draw
   // corpses after the player so a same-cell kill still leaves a visible body.
   const liveZombies = state.zombies.filter((zombie) => isActiveZombie(zombie) && visibleAt(zombie.x, zombie.y));
   const rememberedCorpses = state.zombies.filter((zombie) => zombie.dead && state.visited.has(key(zombie.x, zombie.y)));
-  liveZombies.forEach((zombie) => drawZombie(zombie, cam));
-  drawPlayer(cam);
-  rememberedCorpses.forEach((zombie) => drawZombie(zombie, cam));
-  drawLighting(cam);
+  liveZombies.forEach((zombie) => drawZombieWasteland(zombie, cam));
+  drawPlayerWasteland(cam);
+  rememberedCorpses.forEach((zombie) => drawZombieWasteland(zombie, cam));
+    drawBattleFxWasteland(cam);
+  drawLightingWasteland(cam);
+    drawAmbientWasteland(cam);
   drawPointer(cam);
   // Damage flash: a red veil that fades out right after the player is hit.
   if (state.hitFlash > 0.02) {
@@ -2519,6 +2613,1462 @@ function draw() {
   }
   requestAnimationFrame(draw);
 }
+  function drawTerrainWasteland(cam) {
+    const xStart = Math.max(0, Math.floor(cam.x / TILE) - 1);
+    const yStart = Math.max(0, Math.floor(cam.y / TILE) - 1);
+    const xEnd = Math.min(WORLD_W, Math.ceil((cam.x + canvasState.width) / TILE) + 1);
+    const yEnd = Math.min(WORLD_H, Math.ceil((cam.y + canvasState.height) / TILE) + 1);
+    for (let y = yStart; y < yEnd; y += 1) {
+      for (let x = xStart; x < xEnd; x += 1) {
+        const point = worldToScreen(x, y, cam);
+        const visited = state.visited.has(key(x, y));
+        if (!visited) {
+          ctx.fillStyle = '#0e0a07';
+          ctx.fillRect(point.x, point.y, TILE + 1, TILE + 1);
+          continue;
+        }
+        const terrain = state.terrain[y][x];
+        const n1 = hash2(x, y);
+        const n2 = hash2(x + 17.3, y - 9.7);
+        const n3 = hash2(x * 1.7, y * 2.3);
+        let base = '#302d21';
+        if (terrain === 'asphalt') base = n1 > 0.5 ? '#28231f' : '#24201c';
+        else if (terrain === 'concrete') base = n1 > 0.5 ? '#3a3429' : '#352f26';
+        else if (terrain === 'dry') base = n1 > 0.5 ? '#40351f' : '#382e1c';
+        else base = n1 > 0.5 ? '#2c2a20' : '#29271d';
+        ctx.fillStyle = base;
+        ctx.fillRect(point.x, point.y, TILE + 1, TILE + 1);
+
+        // Broad grime and heat-baked patches, one per tile.
+        ctx.fillStyle = n2 > 0.68 ? 'rgba(0, 0, 0, 0.14)' : n2 > 0.34 ? 'rgba(210, 170, 105, 0.045)' : 'rgba(90, 80, 60, 0.05)';
+        ctx.fillRect(point.x, point.y, TILE + 1, TILE + 1);
+
+        if (terrain === 'asphalt') {
+          // Old tar repair seams and cracks.
+          ctx.strokeStyle = 'rgba(12, 11, 10, 0.6)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(point.x + 4 + n2 * 12, point.y + 2);
+          ctx.lineTo(point.x + 10 + n2 * 20, point.y + TILE * 0.45);
+          ctx.lineTo(point.x + 6 + n3 * 18, point.y + TILE - 3);
+          ctx.stroke();
+          if (n3 > 0.55) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+            ctx.fillRect(point.x + 8 + n2 * 22, point.y + 9 + n3 * 18, 14, 7);
+          }
+          // Road edge wear.
+          if (y === 20 || y === 22 || x === 28 || x === 30) {
+            ctx.strokeStyle = 'rgba(210, 175, 110, 0.16)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            if (y === 20) { ctx.moveTo(point.x, point.y + 1); ctx.lineTo(point.x + TILE, point.y + 1); }
+            if (y === 22) { ctx.moveTo(point.x, point.y + TILE - 1); ctx.lineTo(point.x + TILE, point.y + TILE - 1); }
+            if (x === 28) { ctx.moveTo(point.x + 1, point.y); ctx.lineTo(point.x + 1, point.y + TILE); }
+            if (x === 30) { ctx.moveTo(point.x + TILE - 1, point.y); ctx.lineTo(point.x + TILE - 1, point.y + TILE); }
+            ctx.stroke();
+          }
+          // Dashed center lines for the two arterial roads.
+          if (y === 21 || x === 29) {
+            ctx.strokeStyle = 'rgba(196, 158, 92, 0.2)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 9]);
+            ctx.beginPath();
+            if (y === 21) { ctx.moveTo(point.x, point.y + TILE / 2); ctx.lineTo(point.x + TILE, point.y + TILE / 2); }
+            if (x === 29) { ctx.moveTo(point.x + TILE / 2, point.y); ctx.lineTo(point.x + TILE / 2, point.y + TILE); }
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        } else if (terrain === 'concrete') {
+          // Expansion joints and broken slab edges.
+          ctx.strokeStyle = 'rgba(15, 13, 11, 0.55)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(point.x + 2.5, point.y + 2.5, TILE - 5, TILE - 5);
+          if (n2 > 0.6) {
+            ctx.beginPath();
+            ctx.moveTo(point.x + 4, point.y + TILE * 0.3);
+            ctx.lineTo(point.x + TILE * 0.55, point.y + TILE * 0.38);
+            ctx.lineTo(point.x + TILE - 6, point.y + TILE * 0.28);
+            ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(190, 155, 95, 0.08)';
+          ctx.fillRect(point.x + 7 + n3 * 22, point.y + 8 + n2 * 18, 12, 5);
+        } else if (terrain === 'dry') {
+          // Scorched earth: cracked soil and old burn rings.
+          ctx.strokeStyle = 'rgba(30, 17, 10, 0.7)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(point.x + 8, point.y + 4);
+          ctx.lineTo(point.x + 16, point.y + 18);
+          ctx.lineTo(point.x + 11, point.y + 33);
+          ctx.lineTo(point.x + 27, point.y + 41);
+          ctx.stroke();
+          if (n2 > 0.5) {
+            ctx.fillStyle = 'rgba(15, 9, 6, 0.28)';
+            ctx.beginPath();
+            ctx.arc(point.x + 20 + n3 * 10, point.y + 20 + n2 * 10, 9 + n3 * 7, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else {
+          // Dead grass and scattered rubble.
+          ctx.strokeStyle = 'rgba(128, 108, 70, 0.28)';
+          ctx.lineWidth = 1;
+          for (let tuft = 0; tuft < 3; tuft += 1) {
+            const tx = point.x + 8 + ((n1 * (tuft + 2)) % 1) * 34;
+            const ty = point.y + 9 + ((n2 * (tuft + 3)) % 1) * 32;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty + 6);
+            ctx.lineTo(tx + 3, ty);
+            ctx.moveTo(tx + 2, ty + 6);
+            ctx.lineTo(tx + 6, ty + 2);
+            ctx.stroke();
+          }
+          if (n3 > 0.62) {
+            ctx.fillStyle = 'rgba(120, 105, 80, 0.16)';
+            ctx.fillRect(point.x + 9 + n2 * 25, point.y + 14 + n1 * 20, 9, 5);
+          }
+        }
+
+        // Occasional loose debris across the whole district.
+        if (n3 > 0.8) {
+          ctx.fillStyle = 'rgba(140, 116, 80, 0.28)';
+          ctx.fillRect(point.x + 12 + n2 * 26, point.y + 15 + n1 * 24, 3, 2);
+        }
+      }
+    }
+  }
+
+  function drawBuildingWasteland(building, cam) {
+    const point = worldToScreen(building.x, building.y, cam);
+    const w = building.w * TILE;
+    const h = building.h * TILE;
+    if (point.x > canvasState.width || point.x + w < 0 || point.y > canvasState.height || point.y + h < 0) return;
+    const style = ZONE_STYLES[building.zone];
+    const seen = buildingVisited(building);
+    if (!seen) {
+      ctx.fillStyle = 'rgba(16, 12, 10, 0.9)';
+      ctx.fillRect(point.x, point.y, w, h);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.fillRect(point.x + 3, point.y + 4, w - 6, h - 8);
+      return;
+    }
+
+    // Rubble shadow spilling out from the foundation.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+    ctx.fillRect(point.x + 7, point.y + h - 6, w + 6, 16);
+    ctx.fillRect(point.x + 10, point.y + h - 2, w - 4, 10);
+
+    // Worn wall body with a vertical grime gradient.
+    const wallGrad = ctx.createLinearGradient(0, point.y, 0, point.y + h);
+    wallGrad.addColorStop(0, style.wall);
+    wallGrad.addColorStop(0.6, style.wall);
+    wallGrad.addColorStop(1, '#1a1410');
+    ctx.fillStyle = wallGrad;
+    ctx.fillRect(point.x, point.y, w, h);
+
+    // Missing masonry chunks and surface cracks.
+    const dmg1 = hash2(building.id * 1.3, building.id * 2.1);
+    const dmg2 = hash2(building.id * 3.7, building.id + 4.2);
+    ctx.fillStyle = 'rgba(12, 9, 7, 0.55)';
+    ctx.fillRect(point.x + w * (0.15 + dmg1 * 0.4), point.y + h * 0.12, 11 + dmg2 * 9, 8 + dmg1 * 6);
+    ctx.fillRect(point.x + w * (0.6 + dmg2 * 0.2), point.y + h * 0.55, 9 + dmg1 * 11, 7 + dmg2 * 5);
+    ctx.strokeStyle = 'rgba(14, 10, 8, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(point.x + w * 0.2, point.y + 2);
+    ctx.lineTo(point.x + w * 0.3, point.y + h * 0.25);
+    ctx.lineTo(point.x + w * 0.26, point.y + h * 0.62);
+    ctx.moveTo(point.x + w * 0.82, point.y + h * 0.2);
+    ctx.lineTo(point.x + w * 0.7, point.y + h * 0.5);
+    ctx.stroke();
+
+    const near = insideBuilding(state.player) && buildingAt(state.player.x, state.player.y)?.id === building.id;
+
+    // Roof slab, inset from the walls.
+    const roofGrad = ctx.createLinearGradient(0, point.y + 4, 0, point.y + h - 4);
+    roofGrad.addColorStop(0, near ? '#5c513c' : style.roof);
+    roofGrad.addColorStop(1, near ? '#302a20' : '#211b15');
+    ctx.fillStyle = roofGrad;
+    ctx.fillRect(point.x + 5, point.y + 5, w - 10, h - 10);
+    ctx.strokeStyle = 'rgba(212, 193, 155, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(point.x + 5, point.y + 5, w - 10, h - 10);
+
+    // Broken roof slabs and exposed rebar.
+    if (dmg1 > 0.35) {
+      ctx.fillStyle = 'rgba(8, 6, 5, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(point.x + w * (0.2 + dmg2 * 0.4), point.y + 6);
+      ctx.lineTo(point.x + w * (0.35 + dmg2 * 0.35), point.y + 6);
+      ctx.lineTo(point.x + w * (0.28 + dmg2 * 0.4), point.y + h * 0.28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(188, 118, 65, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(point.x + w * (0.24 + dmg2 * 0.4), point.y + 6);
+      ctx.lineTo(point.x + w * (0.25 + dmg2 * 0.4), point.y + h * 0.24);
+      ctx.moveTo(point.x + w * (0.3 + dmg2 * 0.35), point.y + 6);
+      ctx.lineTo(point.x + w * (0.3 + dmg2 * 0.4), point.y + h * 0.2);
+      ctx.stroke();
+    }
+
+    // Broken, boarded, and faintly lit windows.
+    const cols = Math.max(2, Math.floor(building.w / 2));
+    const rows = Math.max(1, Math.floor(building.h / 2));
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const seed = hash2(building.id + row * 31 + col * 17, building.id * 3 + row * 7 - col);
+        const wx = point.x + 17 + col * (w - 28) / cols;
+        const wy = point.y + 18 + row * (h - 30) / rows;
+        const winW = Math.min(13, (w - 28) / cols - 4);
+        const winH = Math.min(10, (h - 30) / rows - 3);
+        if (near) {
+          ctx.fillStyle = 'rgba(240, 194, 120, 0.5)';
+          ctx.fillRect(wx, wy, winW, winH);
+          continue;
+        }
+        if (seed < 0.22) {
+          ctx.fillStyle = '#3c2a1b';
+          ctx.fillRect(wx, wy, winW, winH);
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(wx, wy + 1);
+          ctx.lineTo(wx + winW, wy + winH - 1);
+          ctx.stroke();
+        } else if (seed < 0.36) {
+          ctx.fillStyle = 'rgba(6, 5, 4, 0.85)';
+          ctx.fillRect(wx, wy, winW, winH);
+        } else if (seed < 0.48) {
+          ctx.fillStyle = 'rgba(222, 145, 66, 0.22)';
+          ctx.fillRect(wx, wy, winW, winH);
+        } else {
+          ctx.fillStyle = 'rgba(12, 15, 14, 0.7)';
+          ctx.fillRect(wx, wy, winW, winH);
+        }
+      }
+    }
+
+    // Rooftop clutter and zone-specific wreckage.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(point.x + w * 0.5, point.y + 8, 5, 4);
+    ctx.fillRect(point.x + w * 0.74, point.y + h * 0.45, 7, 5);
+
+    ctx.fillStyle = style.accent;
+    ctx.fillRect(point.x + w * 0.42, point.y + h - 8, 22, 5);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(point.x + w * 0.46, point.y + h - 7, 14, 3);
+
+    if (building.zone === 'hospital') {
+      ctx.fillStyle = 'rgba(227, 217, 192, 0.62)';
+      ctx.fillRect(point.x + w * 0.18, point.y + 10, 22, 4);
+      ctx.fillRect(point.x + w * 0.18 + 9, point.y + 1, 4, 22);
+    }
+    if (building.zone === 'industrial') {
+      ctx.strokeStyle = 'rgba(196, 116, 62, 0.34)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(point.x + 13, point.y + h - 17);
+      ctx.lineTo(point.x + w - 15, point.y + 17);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(40, 28, 18, 0.85)';
+      ctx.fillRect(point.x + w - 16, point.y + 14, 6, 8);
+    }
+    if (building.zone === 'security') {
+      ctx.strokeStyle = 'rgba(196, 160, 94, 0.3)';
+      ctx.lineWidth = 1;
+      for (let bar = 0; bar < 3; bar += 1) {
+        ctx.beginPath();
+        ctx.moveTo(point.x + w * 0.2, point.y + h * 0.18 + bar * 7);
+        ctx.lineTo(point.x + w * 0.32, point.y + h * 0.18 + bar * 7);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawAmbientWasteland(cam) {
+    const now = performance.now() / 1000;
+    const worldW = WORLD_W * TILE;
+    const worldH = WORLD_H * TILE;
+    for (let i = 0; i < 46; i += 1) {
+      const seedA = hash2(i * 0.37, i + 0.13);
+      const seedB = hash2(i + 7.7, i * 0.91);
+      const speed = 9 + seedB * 26;
+      const wx = ((i * 829 + now * speed * (0.55 + seedA * 0.9)) % worldW + worldW) % worldW;
+      const wy = ((i * 1543 + now * speed * (0.65 + seedB * 0.8)) % worldH + worldH) % worldH;
+      const sx = wx - cam.x;
+      const sy = wy - cam.y;
+      if (sx < -8 || sx > canvasState.width + 8 || sy < -8 || sy > canvasState.height + 8) continue;
+      if (i % 4 === 0) {
+        const alpha = 0.05 + seedA * 0.07;
+        ctx.fillStyle = `rgba(185, 174, 155, ${alpha})`;
+        ctx.fillRect(sx, sy, 2, 2);
+      } else {
+        const alpha = 0.08 + seedA * 0.16;
+        const radius = 0.8 + seedB * 1.5;
+        ctx.fillStyle = `rgba(255, 150, 62, ${alpha * 0.32})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius + 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 196, 104, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  function drawSafePointWasteland(safe, cam) {
+    const point = worldToScreen(safe.x + 0.5, safe.y + 0.5, cam);
+    if (!state.visited.has(key(safe.x, safe.y))) return;
+    const now = performance.now() / 1000;
+    if (safe.active) {
+      const powered = safe.power > 0;
+      const pulse = powered ? 0.5 + Math.sin(now * 1.9 + safe.id * 1.7) * 0.5 : 0.12;
+      const topLeft = worldToScreen(safe.x - safe.radius, safe.y - safe.radius, cam);
+      const side = (safe.radius * 2 + 1) * TILE;
+      ctx.save();
+      for (let ring = 0; ring < 3; ring += 1) {
+        const inset = ring * 3;
+        ctx.strokeStyle = powered
+          ? `rgba(235, 178, 100, ${0.1 + ring * 0.03 + pulse * 0.08})`
+          : `rgba(205, 95, 70, ${0.05 + ring * 0.015})`;
+        ctx.lineWidth = powered ? (ring === 0 ? 2 : 1) : 1;
+        ctx.strokeRect(topLeft.x + 3 + inset, topLeft.y + 3 + inset, side - 6 - inset * 2, side - 6 - inset * 2);
+      }
+      // Barrier corner pylons.
+      for (const corner of [
+        { x: topLeft.x + 2, y: topLeft.y + 2 },
+        { x: topLeft.x + side - 6, y: topLeft.y + 2 },
+        { x: topLeft.x + 2, y: topLeft.y + side - 6 },
+        { x: topLeft.x + side - 6, y: topLeft.y + side - 6 },
+      ]) {
+        ctx.fillStyle = powered ? 'rgba(235, 178, 100, 0.85)' : 'rgba(120, 62, 49, 0.7)';
+        ctx.fillRect(corner.x, corner.y, 4, 4);
+      }
+      // Rusted emitter pylon.
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(point.x - 14, point.y + 5, 28, 7);
+      ctx.fillStyle = powered ? (safe.power > 22 ? '#a9632d' : '#7e3a26') : '#5e3a2a';
+      ctx.fillRect(point.x - 11, point.y - 9, 22, 15);
+      ctx.fillStyle = '#171310';
+      ctx.fillRect(point.x - 8, point.y - 6, 16, 9);
+      ctx.fillStyle = powered
+        ? `rgba(255, 190, 90, ${0.5 + pulse * 0.4})`
+        : 'rgba(150, 80, 60, 0.4)';
+      ctx.fillRect(point.x - 5, point.y - 4, 10, 5);
+      ctx.fillStyle = powered ? '#e2b26a' : '#7b6a56';
+      ctx.fillRect(point.x - 2, point.y - 16, 4, 8);
+      ctx.fillRect(point.x - 10, point.y - 3, 20, 3);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillRect(point.x - 11, point.y + 4, 22, 7);
+      ctx.fillStyle = 'rgba(122, 112, 96, 0.34)';
+      ctx.fillRect(point.x - 9, point.y - 9, 18, 18);
+      ctx.strokeStyle = 'rgba(208, 189, 151, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(point.x - 9, point.y - 9, 18, 18);
+      ctx.beginPath();
+      ctx.moveTo(point.x - 8, point.y - 4);
+      ctx.lineTo(point.x - 2, point.y - 1);
+      ctx.lineTo(point.x - 6, point.y + 6);
+      ctx.stroke();
+    }
+  }
+
+  function drawNoiseWasteland(cam) {
+    const now = performance.now() / 1000;
+    state.noiseEvents.forEach((event, index) => {
+      const point = worldToScreen(event.x + 0.5, event.y + 0.5, cam);
+      const radius = noisePropagationRadius(event) * TILE;
+      const life = clamp(event.ttl / 3, 0, 1);
+      const heat = Boolean(event.heat);
+      ctx.save();
+      ctx.strokeStyle = heat
+        ? `rgba(255, 104, 66, ${0.1 + 0.14 * life})`
+        : `rgba(232, 184, 106, ${0.08 + 0.14 * life})`;
+      ctx.lineWidth = heat ? 2 : 1.5;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      const sweep = (now * 0.9 + index * 0.31) % 1;
+      const pulseRadius = radius * (0.3 + sweep * 0.7);
+      ctx.strokeStyle = heat
+        ? `rgba(255, 130, 80, ${(1 - sweep) * 0.16})`
+        : `rgba(244, 205, 130, ${(1 - sweep) * 0.15})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, pulseRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = heat
+        ? `rgba(255, 120, 70, ${0.35 + life * 0.3})`
+        : `rgba(238, 195, 120, ${0.3 + life * 0.3})`;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, heat ? 3 : 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawZombieWasteland(zombie, cam) {
+    if (zombie.rx === undefined) zombie.rx = zombie.x;
+    if (zombie.ry === undefined) zombie.ry = zombie.y;
+    zombie.rx += (zombie.x - zombie.rx) * 0.32;
+    zombie.ry += (zombie.y - zombie.ry) * 0.32;
+    const point = worldToScreen(zombie.rx + 0.5, zombie.ry + 0.63, cam);
+    const now = performance.now() / 1000;
+    const colors = {
+      common: { body: '#66644a', skin: '#8f8068', cloth: '#4c4433', eye: '#b7472c' },
+      hunter: { body: '#8a4933', skin: '#b07a62', cloth: '#512b20', eye: '#ff8a3c' },
+      screamer: { body: '#7c6a49', skin: '#a48c6d', cloth: '#453d2b', eye: '#d7b65c' },
+      brute: { body: '#50584d', skin: '#7f7d70', cloth: '#2f3630', eye: '#b7432d' },
+    };
+    const type = colors[zombie.type] || colors.common;
+    const scale = zombie.type === 'brute' ? 1.22 : zombie.type === 'hunter' ? 1.04 : 1;
+    const wobble = zombie.dead ? 0 : Math.sin(now * 2.7 + zombie.rx * 1.7 + zombie.ry * 2.1) * 1.3;
+    ctx.save();
+    ctx.translate(point.x, point.y + wobble);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.44)';
+    ctx.beginPath();
+    ctx.ellipse(0, 9, zombie.type === 'brute' ? 18 : 13, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (zombie.dead) {
+      const overlapsPlayer = zombie.x === state.player.x && zombie.y === state.player.y;
+      ctx.translate(overlapsPlayer ? 11 : 0, overlapsPlayer ? 7 : 0);
+      ctx.fillStyle = 'rgba(112, 31, 21, 0.45)';
+      ctx.beginPath();
+      ctx.ellipse(4, 7, 13, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.rotate(-0.18);
+      ctx.fillStyle = type.body;
+      ctx.fillRect(-15, -4, 29, 10);
+      ctx.fillStyle = type.skin;
+      ctx.beginPath();
+      ctx.arc(-16, -2, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2a1712';
+      ctx.fillRect(-18, -3, 2, 2);
+      ctx.fillRect(-13, -3, 2, 2);
+      ctx.strokeStyle = 'rgba(42, 25, 18, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(7, 0);
+      ctx.lineTo(19, -8);
+      ctx.moveTo(7, 5);
+      ctx.lineTo(19, 10);
+      ctx.moveTo(-8, 2);
+      ctx.lineTo(-20, 3);
+      ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(80, 32, 22, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-4, -8);
+      ctx.lineTo(1, -2);
+      ctx.moveTo(6, 4);
+      ctx.lineTo(12, 1);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    // Legs and tattered clothing.
+    ctx.strokeStyle = type.cloth;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-5, 6);
+    ctx.lineTo(-8, 13);
+    ctx.moveTo(5, 6);
+    ctx.lineTo(8, 13);
+    ctx.stroke();
+    // Torso.
+    ctx.fillStyle = type.body;
+    ctx.beginPath();
+    ctx.moveTo(-9, -12);
+    ctx.lineTo(9, -12);
+    ctx.lineTo(11, 4);
+    ctx.lineTo(5, 10);
+    ctx.lineTo(-7, 10);
+    ctx.lineTo(-11, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = type.cloth;
+    ctx.fillRect(-8, -9, 16, 6);
+    // Arms reaching forward.
+    ctx.strokeStyle = type.body;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-8, -7);
+    ctx.lineTo(-14, 1);
+    ctx.moveTo(8, -7);
+    ctx.lineTo(14, 1);
+    ctx.stroke();
+    ctx.strokeStyle = type.skin;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-14, 1);
+    ctx.lineTo(-17, 5);
+    ctx.moveTo(14, 1);
+    ctx.lineTo(17, 5);
+    ctx.stroke();
+    // Head and jaw.
+    const headR = zombie.type === 'brute' ? 8 : 7;
+    ctx.fillStyle = type.skin;
+    ctx.beginPath();
+    ctx.arc(0, -18, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = type.cloth;
+    ctx.fillRect(-headR + 2, -14, headR * 2 - 4, 3);
+    ctx.fillStyle = type.eye;
+    ctx.fillRect(-5, -20, 3, 2);
+    ctx.fillRect(2, -20, 3, 2);
+    if (zombie.type === 'screamer') {
+      ctx.fillStyle = '#2b140f';
+      ctx.beginPath();
+      ctx.ellipse(0, -13, 5, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const shriek = zombie.state === 'track' ? 0.6 + Math.sin(now * 8) * 0.2 : 0.25;
+      ctx.strokeStyle = `rgba(226, 185, 103, ${shriek})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, -14, 12 + shriek * 4, Math.PI + 0.15, Math.PI * 2 - 0.15);
+      ctx.stroke();
+    }
+    if (zombie.type === 'hunter') {
+      ctx.strokeStyle = `rgba(255, 126, 46, ${0.55 + Math.sin(now * 5 + zombie.rx) * 0.25})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-5, -12);
+      ctx.lineTo(-2, -7);
+      ctx.lineTo(-7, -3);
+      ctx.moveTo(6, -12);
+      ctx.lineTo(3, -6);
+      ctx.lineTo(8, -4);
+      ctx.stroke();
+    }
+    if (zombie.type === 'brute') {
+      ctx.fillStyle = 'rgba(36, 43, 38, 0.85)';
+      ctx.fillRect(-10, -14, 20, 15);
+      ctx.strokeStyle = 'rgba(189, 193, 174, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-10, -14, 20, 15);
+    }
+    // Wound.
+    ctx.strokeStyle = 'rgba(104, 24, 18, 0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-3, -6);
+    ctx.lineTo(2, -2);
+    ctx.lineTo(-1, 3);
+    ctx.stroke();
+
+    if (zombie.state === 'track') {
+      const lockPulse = 0.5 + Math.sin(now * 6 + zombie.rx) * 0.5;
+      ctx.strokeStyle = `rgba(226, 123, 65, ${0.35 + lockPulse * 0.25})`;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(0, -4, 19 + lockPulse * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (state.selectedTarget?.kind === 'zombie' && state.selectedTarget.id === zombie.id) {
+      ctx.strokeStyle = 'rgba(238, 197, 119, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, -5, 22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawSurvivorPlayerSprite(point, facing, aimAngle) {
+    const now = performance.now();
+    const hasAction = state.player.actionPose && now < (state.player.actionUntil || 0);
+    const action = hasAction ? state.player.actionPose : null;
+    const aimActive = (action === 'shoot' || action === 'melee' || state.player.aimLocked) && typeof aimAngle === 'number';
+    const angle = aimActive ? aimAngle : ({ e: 0, w: Math.PI, n: -Math.PI / 2, s: Math.PI / 2 }[facing] || 0);
+    const moving = action === 'shoot' ? true : !action && (
+      Math.abs(state.player.rx - state.player.x) + Math.abs(state.player.ry - state.player.y) > 0.06
+      || (state.player.lastMoveAt && now - state.player.lastMoveAt < 180)
+    );
+    let setKey = moving ? 'move' : 'idle';
+    if (action === 'shoot') setKey = 'shoot';
+    else if (action === 'melee') setKey = 'melee';
+    else if (action === 'hurt') setKey = 'idle';
+    const set = survivorSprites.images[setKey];
+    if (!set || !set.length) return false;
+
+    // Frames are rendered facing east; orientation is applied by rotating/mirroring below.
+    let frame = 0;
+    if (setKey === 'shoot') {
+      const startAt = (state.player.actionUntil || now + 480) - 480;
+      frame = Math.min(2, Math.max(0, Math.floor((now - startAt) / 150)));
+    } else if (setKey === 'melee') {
+      const startAt = (state.player.actionUntil || now + 520) - 520;
+      const progress = clamp((now - startAt) / 520, 0, 1);
+      frame = Math.min(set.length - 1, Math.floor(progress * set.length));
+    } else if (moving) {
+      frame = Math.floor(now / 55) % set.length;
+    } else {
+      frame = Math.floor(now / 110) % set.length;
+    }
+
+    let image = set[frame];
+      if (!image || !image.complete || !image.naturalWidth || !image.naturalHeight) {
+        image = set.find((candidate) => candidate && candidate.complete && candidate.naturalWidth && candidate.naturalHeight);
+      }
+    if (!image || !image.complete || !image.naturalWidth || !image.naturalHeight) return false;
+
+    const height = TILE * 1.12;
+    const width = height * (image.naturalWidth / image.naturalHeight);
+    const bob = moving ? Math.sin(now / 90) * 1.6 : action === 'shoot' ? 1 : Math.sin(now / 320) * 0.6;
+    const aimShift = Math.max(width, height) * 0.09;
+    const aimShiftX = Math.cos(angle) * aimShift;
+    const aimShiftY = Math.sin(angle) * aimShift;
+
+    ctx.save();
+    ctx.translate(point.x, point.y + bob);
+      ctx.translate(aimShiftX, aimShiftY);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+    ctx.beginPath();
+    ctx.ellipse(0, height / 2 - 2, width * 0.34, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(angle);
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+
+    if (action === 'hurt') {
+      ctx.fillStyle = 'rgba(190, 55, 35, 0.16)';
+      ctx.fillRect(-width / 2, -height / 2, width, height);
+    }
+    ctx.restore();
+    return true;
+  }
+
+
+  function drawPlayerWasteland(cam) {
+    if (state.player.rx === undefined) state.player.rx = state.player.x;
+    if (state.player.ry === undefined) state.player.ry = state.player.y;
+    state.player.rx += (state.player.x - state.player.rx) * 0.32;
+    state.player.ry += (state.player.y - state.player.ry) * 0.32;
+    const point = worldToScreen(state.player.rx + 0.5, state.player.ry + 0.65, cam);
+    const spritePoint = worldToScreen(state.player.rx + 0.5, state.player.ry + 0.5, cam);
+    const spriteGunShift = TILE * 0.1;
+    const orientedSpritePoint = { x: spritePoint.x, y: spritePoint.y };
+    if (state.player.facing === 'e') orientedSpritePoint.x += spriteGunShift;
+    else if (state.player.facing === 'w') orientedSpritePoint.x -= spriteGunShift;
+    else if (state.player.facing === 'n') orientedSpritePoint.y -= spriteGunShift;
+    else if (state.player.facing === 's') orientedSpritePoint.y += spriteGunShift;
+    const now = performance.now() / 1000;
+    const bob = Math.sin(now * 3.1) * 0.7;
+    const facing = state.player.facing;
+    initSurvivorSprites();
+    if (survivorSprites.total > 0 && survivorSprites.ready >= survivorSprites.total && drawSurvivorPlayerSprite(spritePoint, facing, state.player.aimAngle)) return;
+    ctx.save();
+    ctx.translate(point.x, point.y + bob);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+    ctx.beginPath();
+    ctx.ellipse(0, 10, 16, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cape / stealth gear behind the body.
+    if (equipped('cloak') || equipped('ghillie')) {
+      ctx.fillStyle = equipped('ghillie') ? 'rgba(55, 61, 44, 0.95)' : 'rgba(62, 49, 38, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(-8, -10);
+      ctx.lineTo(9, -8);
+      ctx.lineTo(14, 9);
+      ctx.lineTo(-13, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Backpack / heavy rig.
+    if (equipped('backpack') || equipped('heavyBackpack')) {
+      ctx.fillStyle = equipped('heavyBackpack') ? '#4a3e2f' : '#57452f';
+      ctx.fillRect(-14, -10, 10, 17);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-14, -10, 10, 17);
+      ctx.fillStyle = '#2e251a';
+      ctx.fillRect(-11, -7, 4, 11);
+    }
+
+    // Legs.
+    ctx.fillStyle = '#373126';
+    ctx.fillRect(-7, 4, 5, 8);
+    ctx.fillRect(3, 4, 5, 8);
+    // Torso coat.
+    ctx.fillStyle = equipped('armor') || equipped('armorLite') ? '#4f4d3e' : '#6b5a40';
+    ctx.beginPath();
+    ctx.moveTo(-9, -12);
+    ctx.lineTo(9, -12);
+    ctx.lineTo(11, 5);
+    ctx.lineTo(-11, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(-9, 0, 18, 3);
+    // Armor plate.
+    if (equipped('armor') || equipped('armorLite')) {
+      ctx.fillStyle = equipped('armor') ? '#3d4a3d' : '#4a4639';
+      ctx.fillRect(-8, -9, 16, 10);
+      ctx.strokeStyle = 'rgba(210, 195, 150, 0.28)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-8, -9, 16, 10);
+    }
+    // Belt pouches.
+    ctx.fillStyle = '#473823';
+    ctx.fillRect(-11, -2, 4, 5);
+    ctx.fillRect(7, -2, 4, 5);
+    // Scarf.
+    ctx.fillStyle = '#8a4528';
+    ctx.fillRect(-6, -15, 12, 4);
+
+    // Head.
+    drawPlayerHeadWastelandRefined(facing);
+      if (false) {
+      const headY = -17;
+    ctx.fillStyle = '#b99770';
+    ctx.beginPath();
+    ctx.arc(0, headY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    if (equipped('helmet')) {
+      ctx.fillStyle = '#4c4f43';
+      ctx.beginPath();
+      ctx.arc(0, headY - 1, 9, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-9, headY - 1, 18, 3);
+    } else {
+      ctx.fillStyle = '#3a2b1d';
+      ctx.fillRect(-8, headY - 10, 16, 5);
+    }
+    if (equipped('goggles')) {
+      ctx.fillStyle = '#1d2623';
+      ctx.fillRect(-7, headY - 4, 14, 4);
+      ctx.fillStyle = 'rgba(123, 200, 177, 0.75)';
+      ctx.fillRect(-6, headY - 3, 5, 2);
+      ctx.fillRect(1, headY - 3, 5, 2);
+    }
+    // Face direction indicator.
+    ctx.fillStyle = '#1a100b';
+    if (facing !== 'n') ctx.fillRect(facing === 'w' ? -6 : facing === 'e' ? 4 : -1, headY - 2, 2, 2);
+    // Facing north: back of the head, so no face marker is drawn.
+      }
+
+    // Weapon: firearm and/or melee tool.
+    ctx.strokeStyle = '#26231f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(7, 1);
+    if (facing === 'w') ctx.lineTo(-16, -2);
+    else if (facing === 'n') ctx.lineTo(10, -11);
+    else if (facing === 's') ctx.lineTo(10, 11);
+    else ctx.lineTo(17, -2);
+    ctx.stroke();
+    if (equipped('weapon') || equipped('axe')) {
+      const side = facing === 'w' ? -1 : 1;
+      ctx.strokeStyle = '#5d472b';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-7, 4);
+      ctx.lineTo(-12 * side, -18);
+      ctx.stroke();
+      ctx.fillStyle = equipped('axe') ? '#8e8e86' : '#6e6046';
+      ctx.beginPath();
+      ctx.moveTo(-15 * side, -20);
+      ctx.lineTo(-10 * side, -16);
+      ctx.lineTo(-9 * side, -23);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  if (false) {
+  function drawPlayerHeadWasteland(facing) {
+    const headY = -16;
+    // Neck and jaw shadow.
+    ctx.fillStyle = '#7c6044';
+    ctx.fillRect(-3, -13, 6, 4);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 1, 8, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Head base.
+    ctx.fillStyle = '#b99770';
+    ctx.beginPath();
+    ctx.ellipse(0, headY, 7.4, 8.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Ears.
+    ctx.fillStyle = '#987652';
+    ctx.fillRect(-9, headY - 1, 2.5, 4);
+    ctx.fillRect(6.5, headY - 1, 2.5, 4);
+    if (equipped('helmet')) {
+      ctx.fillStyle = '#4f5548';
+      ctx.beginPath();
+      ctx.arc(0, headY - 1, 9, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-9, headY - 1, 18, 4);
+      ctx.fillStyle = 'rgba(210, 195, 150, 0.28)';
+      ctx.fillRect(-9, headY + 1, 18, 1.5);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, headY - 1, 9, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // Worn hood / beanie.
+      ctx.fillStyle = '#3a2b1d';
+      ctx.beginPath();
+      ctx.arc(0, headY - 2, 8.2, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-8.2, headY - 2, 16.4, 5);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.fillRect(-8.2, headY - 2, 16.4, 1.5);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.32)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-8.2, headY - 1);
+      ctx.lineTo(8.2, headY - 1);
+      ctx.stroke();
+    }
+    if (equipped('goggles')) {
+      ctx.fillStyle = '#1d2623';
+      ctx.fillRect(-7.5, headY - 4, 15, 5);
+      ctx.fillStyle = 'rgba(123, 200, 177, 0.8)';
+      ctx.fillRect(-6.5, headY - 3, 5, 2);
+      ctx.fillRect(1.5, headY - 3, 5, 2);
+      ctx.fillStyle = 'rgba(220, 225, 200, 0.35)';
+      ctx.fillRect(-5.5, headY - 3, 1.5, 2);
+      ctx.fillRect(2.5, headY - 3, 1.5, 2);
+    } else if (facing !== 'n') {
+      // Eyes, nose and mouth depending on facing.
+      const eyeX = facing === 'w' ? -5 : facing === 'e' ? 3 : -1;
+      ctx.fillStyle = '#1d130d';
+      ctx.fillRect(eyeX, headY - 2, 2, 2);
+      ctx.fillRect(eyeX + 4, headY - 2, 2, 2);
+      ctx.fillStyle = '#8c6444';
+      ctx.fillRect(facing === 'w' ? -7 : facing === 'e' ? 5 : -1, headY + 1, 1.5, 2);
+      ctx.fillStyle = '#6e4934';
+      ctx.fillRect(facing === 'w' ? -4 : facing === 'e' ? 2 : -1, headY + 5, 3, 1.2);
+    } else {
+      // Back of the head: hood seam and strap.
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-4, headY - 9);
+      ctx.lineTo(-4, headY + 4);
+      ctx.moveTo(4, headY - 9);
+      ctx.lineTo(4, headY + 4);
+      ctx.stroke();
+    }
+    // Jaw line and cheek shading.
+    ctx.strokeStyle = 'rgba(90, 58, 38, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, headY + 2, 5.6, 0.35 * Math.PI, 0.65 * Math.PI);
+    ctx.stroke();
+  }
+  }
+  function drawPlayerHeadWastelandRefined(facing) {
+    const headY = -16;
+    const face = '#b28a62';
+    const skinLight = '#cfa97e';
+    const skinDark = '#7e5b40';
+
+    // Neck.
+    ctx.fillStyle = '#70573d';
+    ctx.fillRect(-3.5, -13, 7, 5);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.fillRect(-3.5, -10, 7, 2);
+
+    // Soft head silhouette with cheekbones.
+    ctx.fillStyle = face;
+    ctx.beginPath();
+    ctx.moveTo(0, headY - 9.5);
+    ctx.bezierCurveTo(8.6, headY - 9.5, 9.2, headY - 1, 7.8, headY + 5);
+    ctx.quadraticCurveTo(5, headY + 9, 0, headY + 9);
+    ctx.quadraticCurveTo(-5, headY + 9, -7.8, headY + 5);
+    ctx.bezierCurveTo(-9.2, headY - 1, -8.6, headY - 9.5, 0, headY - 9.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Face shading: temple shadow and chin highlight.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.10)';
+    ctx.beginPath();
+    ctx.moveTo(-8.6, headY - 8);
+    ctx.quadraticCurveTo(-7.5, headY + 2, -3, headY + 7.5);
+    ctx.lineTo(-1, headY + 7.5);
+    ctx.quadraticCurveTo(-4, headY - 1, -3.5, headY - 8.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 224, 184, 0.14)';
+    ctx.beginPath();
+    ctx.ellipse(1.5, headY + 5, 3.5, 2.2, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ears.
+    ctx.fillStyle = face;
+    ctx.beginPath();
+    ctx.ellipse(-8.7, headY - 0.5, 2.1, 3.2, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(8.7, headY - 0.5, 2.1, 3.2, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(60, 36, 23, 0.35)';
+    ctx.beginPath();
+    ctx.arc(-8.6, headY, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(8.6, headY, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hood or helmet, with fabric folds.
+    if (equipped('helmet')) {
+      ctx.fillStyle = '#444a40';
+      ctx.beginPath();
+      ctx.arc(0, headY - 1.5, 9.6, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-9.6, headY - 1.5, 19.2, 4.5);
+      ctx.fillStyle = 'rgba(220, 220, 190, 0.25)';
+      ctx.beginPath();
+      ctx.arc(0, headY - 4, 7.8, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(220, 220, 190, 0.25)';
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, headY - 1.5, 9.6, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#4a3423';
+      ctx.beginPath();
+      ctx.arc(0, headY - 3.2, 7.8, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-7.8, headY - 3.2, 15.6, 3.8);
+      ctx.fillStyle = '#5b412a';
+      ctx.fillRect(-7.8, headY - 3.2, 15.6, 1.2);
+      ctx.fillStyle = '#2e2016';
+      ctx.fillRect(-7.8, headY + 0.2, 15.6, 0.8);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-6.5, headY - 3.4);
+      ctx.lineTo(-6.5, headY - 1);
+      ctx.moveTo(6.5, headY - 3.4);
+      ctx.lineTo(6.5, headY - 1);
+      ctx.stroke();
+    }
+
+    if (equipped('goggles')) {
+      ctx.fillStyle = '#151d1a';
+      ctx.fillRect(-8, headY - 5, 16, 5.5);
+      ctx.fillStyle = 'rgba(123, 200, 177, 0.85)';
+      ctx.fillRect(-6.5, headY - 4, 5.2, 2.4);
+      ctx.fillRect(1.3, headY - 4, 5.2, 2.4);
+      ctx.fillStyle = 'rgba(230, 250, 235, 0.35)';
+      ctx.fillRect(-5.6, headY - 4, 1.4, 2.4);
+      ctx.fillRect(2.2, headY - 4, 1.4, 2.4);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-8, headY - 5, 16, 5.5);
+    } else if (facing !== 'n') {
+      // Brow shadow.
+      ctx.fillStyle = 'rgba(50, 31, 20, 0.25)';
+      ctx.fillRect(-6.5, headY - 5.5, 6, 2);
+      ctx.fillRect(0.5, headY - 5.5, 6, 2);
+      // Eyes with whites and pupils.
+      const eyeX = facing === 'w' ? -5 : facing === 'e' ? 3 : -2;
+      ctx.fillStyle = '#e6d8c2';
+      ctx.beginPath();
+      ctx.ellipse(eyeX, headY - 3, 1.8, 1.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(eyeX + 5, headY - 3, 1.8, 1.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2b1d14';
+      ctx.beginPath();
+      ctx.arc(eyeX + (facing === 'e' ? 0.6 : -0.2), headY - 3, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(eyeX + 5 + (facing === 'e' ? 0.6 : -0.2), headY - 3, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      // Nose bridge and nostrils.
+      ctx.strokeStyle = 'rgba(112, 72, 46, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(eyeX + 2.5, headY - 4.5);
+      ctx.lineTo(eyeX + 2.5, headY + 1);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(105, 66, 42, 0.6)';
+      ctx.fillRect(eyeX + 1.6, headY + 1, 2, 1);
+      // Mouth line.
+      ctx.strokeStyle = 'rgba(101, 57, 38, 0.55)';
+      ctx.beginPath();
+      ctx.moveTo(eyeX + 0.8, headY + 5.5);
+      ctx.quadraticCurveTo(eyeX + 2.6, headY + 6.2, eyeX + 4.4, headY + 5.4);
+      ctx.stroke();
+    } else {
+      // Back of head: hood seam and strap.
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-4, headY - 8);
+      ctx.lineTo(-4, headY + 3);
+      ctx.moveTo(4, headY - 8);
+      ctx.lineTo(4, headY + 3);
+      ctx.stroke();
+    }
+
+    if (false) { // old chin shading block
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.10)';
+    ctx.beginPath();
+    ctx.moveTo(-7.6, headY + 2.2);
+    ctx.quadraticCurveTo(-6, headY + 6.5, -2.5, headY + 8.4);
+    ctx.lineTo(2.5, headY + 8.4);
+    ctx.quadraticCurveTo(6, headY + 6.5, 7.6, headY + 2.2);
+    ctx.quadraticCurveTo(0, headY + 4.8, -7.6, headY + 2.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.fillRect(-7.2, headY + 4.2, 14.4, 1.4);
+    ctx.fillRect(-7.2, headY + 6.4, 14.4, 1.4);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-7.6, headY + 2.2);
+    ctx.quadraticCurveTo(0, headY + 4.8, 7.6, headY + 2.2);
+    ctx.stroke();
+    }
+    // Soft chin shadow only — no mask, no bandana.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 6.2, 3.8, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 220, 180, 0.10)';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 4.8, 2.8, 1.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+    if (false) { // misplaced shading block
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 6.2, 3.8, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 220, 180, 0.10)';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 4.8, 2.8, 1.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    }
+
+
+
+  function drawWeatherWasteland(cam) {
+    const weather = currentWeather().name;
+    const now = performance.now() / 1000;
+    if (weather === '雨') {
+      ctx.fillStyle = 'rgba(55, 70, 78, 0.1)';
+      ctx.fillRect(0, 0, canvasState.width, canvasState.height);
+      ctx.strokeStyle = 'rgba(167, 194, 202, 0.16)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 70; i += 1) {
+        const seedA = hash2(i * 0.73, i + 0.31);
+        const seedB = hash2(i + 3.7, i * 1.13);
+        const sx = ((i * 179 + now * (150 + seedA * 90)) % (canvasState.width + 60)) - 30;
+        const sy = ((i * 293 + now * (620 + seedB * 260)) % (canvasState.height + 60)) - 30;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx - 2 - seedA * 2, sy + 10 + seedB * 8);
+        ctx.stroke();
+      }
+    } else if (weather === '雾') {
+      ctx.fillStyle = 'rgba(172, 161, 135, 0.07)';
+      ctx.fillRect(0, 0, canvasState.width, canvasState.height);
+      for (let band = 0; band < 5; band += 1) {
+        const seedA = hash2(band * 1.7, band + 0.9);
+        const seedB = hash2(band + 4.3, band * 2.3);
+        const y = ((band * 173 + now * (18 + seedB * 14)) % (canvasState.height + 120)) - 60;
+        const x = ((seedA - 0.5) * 260 + Math.sin(now * 0.5 + band) * 80);
+        const width = 260 + seedB * 280;
+        const grad = ctx.createLinearGradient(x, y, x + width, y);
+        grad.addColorStop(0, 'rgba(180, 168, 140, 0)');
+        grad.addColorStop(0.5, `rgba(180, 168, 140, ${0.08 + seedA * 0.05})`);
+        grad.addColorStop(1, 'rgba(180, 168, 140, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y, width, 42 + seedB * 30);
+      }
+    }
+  }
+
+  function drawLightingWasteland(cam) {
+    const phase = phaseName();
+    const now = performance.now() / 1000;
+    if (phase === '夜晚') {
+      ctx.fillStyle = 'rgba(5, 10, 18, 0.56)';
+      ctx.fillRect(0, 0, canvasState.width, canvasState.height);
+      const player = worldToScreen(state.player.x + 0.5, state.player.y + 0.5, cam);
+      const flicker = 0.85 + Math.sin(now * 11) * 0.06 + Math.sin(now * 23) * 0.05;
+      const light = ctx.createRadialGradient(player.x, player.y, 10, player.x, player.y, TILE * 4.5);
+      light.addColorStop(0, `rgba(240, 198, 122, ${0.32 * flicker})`);
+      light.addColorStop(1, 'rgba(240, 198, 122, 0)');
+      ctx.fillStyle = light;
+      ctx.fillRect(player.x - TILE * 5, player.y - TILE * 5, TILE * 10, TILE * 10);
+    } else if (phase === '黄昏') {
+      ctx.fillStyle = 'rgba(158, 76, 42, 0.2)';
+      ctx.fillRect(0, 0, canvasState.width, canvasState.height);
+    }
+    state.safePoints.filter((safe) => safe.active && safe.power > 0 && state.visited.has(key(safe.x, safe.y))).forEach((safe) => {
+      const point = worldToScreen(safe.x + 0.5, safe.y + 0.5, cam);
+      const flicker = 0.85 + Math.sin(now * 8 + safe.id) * 0.08 + Math.sin(now * 17 + safe.id * 2) * 0.05;
+      const light = ctx.createRadialGradient(point.x, point.y, 5, point.x, point.y, TILE * 2.2);
+      light.addColorStop(0, `rgba(237, 191, 113, ${0.12 * flicker})`);
+      light.addColorStop(1, 'rgba(237, 191, 113, 0)');
+      ctx.fillStyle = light;
+      ctx.fillRect(point.x - TILE * 2.5, point.y - TILE * 2.5, TILE * 5, TILE * 5);
+    });
+    drawWeatherWasteland(cam);
+  }
+  function addBattleFx(type, x, y, options = {}) {
+    state.fx = state.fx || [];
+    state.fx.push({ type, x, y, at: performance.now(), life: options.life || 460, power: options.power || 1, facing: options.facing || 'e', angle: options.angle });
+  }
+
+  function drawBattleFxWasteland(cam) {
+    if (!state.fx?.length) return;
+    const now = performance.now();
+    state.fx = state.fx.filter((fx) => now - fx.at < fx.life);
+    state.fx.forEach((fx) => {
+      const t = clamp((now - fx.at) / fx.life, 0, 1);
+      const point = worldToScreen(fx.x + 0.5, fx.y + 0.5, cam);
+      if (point.x < -40 || point.x > canvasState.width + 40 || point.y < -40 || point.y > canvasState.height + 40) return;
+      const alpha = 1 - t;
+      ctx.save();
+      ctx.translate(point.x, point.y);
+      if (fx.type === 'muzzle') {
+        const aimDir = fx.angle != null ? fx.angle : ({ w: Math.PI, e: 0, n: -Math.PI / 2, s: Math.PI / 2 }[fx.facing] || 0);
+          const dirX = Math.cos(aimDir);
+          const dirY = Math.sin(aimDir);
+        // dirY is derived from aimDir above
+        const tipX = dirX * 16;
+        const tipY = dirY * 16;
+        ctx.fillStyle = `rgba(255, 208, 110, ${alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(tipX, tipY, 7 + fx.power * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255, 226, 150, ${alpha * 0.85})`;
+        ctx.lineWidth = 2;
+        for (let ray = 0; ray < 5; ray += 1) {
+          const angle = (ray / 5) * Math.PI * 2 + fx.power;
+          const len = 8 + fx.power * 3 + t * 6;
+          ctx.beginPath();
+          ctx.moveTo(tipX + Math.cos(angle) * 4, tipY + Math.sin(angle) * 4);
+          ctx.lineTo(tipX + Math.cos(angle) * len, tipY + Math.sin(angle) * len);
+          ctx.stroke();
+        }
+      } else if (fx.type === 'impact') {
+        ctx.strokeStyle = `rgba(255, 197, 105, ${alpha * 0.9})`;
+        ctx.lineWidth = 1.5;
+        for (let spark = 0; spark < 7; spark += 1) {
+          const angle = (spark / 7) * Math.PI * 2 + fx.power;
+          const len = (5 + fx.power * 4) * t + 4;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(angle) * 3, Math.sin(angle) * 3);
+          ctx.lineTo(Math.cos(angle) * len, Math.sin(angle) * len);
+          ctx.stroke();
+        }
+      } else if (fx.type === 'blood') {
+        ctx.fillStyle = `rgba(146, 36, 24, ${alpha * 0.7})`;
+        for (let drop = 0; drop < 9; drop += 1) {
+          const angle = (drop / 9) * Math.PI * 2 + fx.power * 0.7;
+          const dist = 4 + t * (10 + (drop % 3) * 4);
+          const radius = 1 + (drop % 3) * 0.7 * (1 - t * 0.5);
+          ctx.beginPath();
+          ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist * 0.8 - 2, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (fx.type === 'claw') {
+        ctx.strokeStyle = `rgba(206, 67, 43, ${alpha * 0.75})`;
+        ctx.lineWidth = 3;
+        for (let slash = -1; slash <= 1; slash += 2) {
+          ctx.beginPath();
+          ctx.moveTo(-8, -10 + slash * 4);
+          ctx.lineTo(6, 2 + slash * 7);
+          ctx.lineTo(-2, 8 + slash * 4);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    });
+  }
+  function drawContainersWasteland(cam) {
+    state.containers.forEach((container) => {
+      const airdrop = container.type === '补给空投';
+      const point = worldToScreen(container.x + 0.5, container.y + 0.58, cam);
+      if (airdrop && containerHasLoot(container) && squareDistance(state.player, container) <= 14) {
+        const drift = (performance.now() / 700) % 1;
+        for (let puff = 0; puff < 4; puff += 1) {
+          const rise = (drift + puff / 4) % 1;
+          const puffX = point.x + Math.sin(drift * 6 + puff * 2.1) * (5 + puff * 2);
+          const puffY = point.y - 10 - rise * 38;
+          ctx.fillStyle = `rgba(170, 162, 146, ${(1 - rise) * 0.16})`;
+          ctx.beginPath();
+          ctx.arc(puffX, puffY, 3 + rise * 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(226, 145, 70, ${(1 - rise) * 0.2})`;
+          ctx.beginPath();
+          ctx.arc(puffX + 2, puffY + 2, 1.5 + rise * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(240, 170, 80, .9)';
+        ctx.fillRect(point.x - 2, point.y - 15, 4, 5);
+      }
+      if (!visibleAt(container.x, container.y) && !state.visited.has(key(container.x, container.y))) return;
+      const open = container.status === 'open';
+      const selected = state.selectedTarget?.kind === 'container' && state.selectedTarget.id === container.id;
+      ctx.save();
+      ctx.translate(point.x, point.y);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      ctx.beginPath();
+      ctx.ellipse(0, 9, 16, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const body = open
+        ? '#3c3730'
+        : airdrop
+          ? '#6b5231'
+          : container.type.includes('医疗')
+            ? '#5e6f63'
+            : container.type.includes('军')
+              ? '#4c5544'
+              : container.type.includes('电子')
+                ? '#4d5147'
+                : '#6b5135';
+      const rim = open ? '#8c7752' : airdrop ? '#a57a3d' : '#221a13';
+      const grad = ctx.createLinearGradient(0, -8, 0, 8);
+      grad.addColorStop(0, body);
+      grad.addColorStop(1, open ? '#29241e' : body);
+      ctx.fillStyle = grad;
+      ctx.fillRect(-13, -8, 26, 16);
+      ctx.fillStyle = rim;
+      ctx.fillRect(-13, -2, 26, 3);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.fillRect(-13, 5, 26, 3);
+      // Rivets and hazard stripe.
+      ctx.fillStyle = 'rgba(203, 157, 91, 0.55)';
+      ctx.fillRect(-12, -7, 2, 2);
+      ctx.fillRect(10, -7, 2, 2);
+      ctx.fillRect(-12, 5, 2, 2);
+      ctx.fillRect(10, 5, 2, 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.fillRect(-13, -1, 26, 2);
+      if (!open) {
+        ctx.fillStyle = 'rgba(220, 178, 93, 0.75)';
+        ctx.fillRect(-4, -4, 8, 5);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(-2, -3, 4, 3);
+      } else {
+        const openProgress = clamp((performance.now() - (container.openedAt || 0)) / 280, 0, 1);
+        ctx.save();
+        ctx.translate(0, -15 - openProgress * 5);
+        ctx.rotate(-0.22 * openProgress);
+        ctx.fillStyle = '#2a251f';
+        ctx.fillRect(-14, -2, 28, 6);
+        ctx.fillStyle = 'rgba(205, 153, 82, 0.4)';
+        ctx.fillRect(-14, 4, 28, 2);
+        ctx.restore();
+        ctx.fillStyle = `rgba(232, 184, 100, ${0.12 + Math.sin(performance.now() / 240) * 0.04})`;
+        ctx.fillRect(-9, -5, 18, 9);
+      }
+      if (selected) {
+        ctx.strokeStyle = 'rgba(238, 197, 119, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(-18, -13, 36, 30);
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+    });
+  }
+
+  function drawGroundLootWasteland(cam) {
+    state.groundLoot.forEach((drop) => {
+      if (!visibleAt(drop.x, drop.y) && !state.visited.has(key(drop.x, drop.y))) return;
+      const point = worldToScreen(drop.x + 0.5, drop.y + 0.58, cam);
+      const selected = state.selectedTarget?.kind === 'groundLoot' && state.selectedTarget.id === drop.id;
+      ctx.save();
+      ctx.translate(point.x, point.y);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.beginPath();
+      ctx.ellipse(0, 8, 13, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#3f3425';
+      ctx.beginPath();
+      ctx.moveTo(-12, 2);
+      ctx.lineTo(-10, -5);
+      ctx.lineTo(9, -7);
+      ctx.lineTo(12, 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#6b5432';
+      ctx.fillRect(-10, -7, 19, 5);
+      ctx.strokeStyle = '#17120c';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-10, -5);
+      ctx.lineTo(9, -7);
+      ctx.moveTo(-10, -2);
+      ctx.lineTo(9, -4);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(235, 180, 95, 0.85)';
+      ctx.fillRect(-6, -6, 3, 2);
+      ctx.fillStyle = '#d6b06a';
+      ctx.font = '700 9px Segoe UI, Microsoft YaHei, sans-serif';
+      ctx.fillText(`×${drop.amount}`, 13, -8);
+      if (selected) {
+        ctx.strokeStyle = 'rgba(238, 197, 119, 0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(-15, -13, 34, 24);
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+    });
+  }
+
+  function drawTerminalWasteland(cam) {
+    if (!visibleAt(state.terminal.x, state.terminal.y) && !state.visited.has(key(state.terminal.x, state.terminal.y))) return;
+    const point = worldToScreen(state.terminal.x + 0.5, state.terminal.y + 0.5, cam);
+    const now = performance.now() / 1000;
+    const activated = state.terminalActivated;
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(-18, 9, 36, 6);
+    ctx.fillStyle = '#40372a';
+    ctx.fillRect(-15, -8, 30, 17);
+    ctx.fillStyle = '#1b1712';
+    ctx.fillRect(-12, -5, 24, 11);
+    ctx.fillStyle = activated
+      ? `rgba(129, 212, 176, ${0.7 + Math.sin(now * 3) * 0.15})`
+      : `rgba(115, 178, 163, ${0.45 + Math.sin(now * 2) * 0.1})`;
+    ctx.fillRect(-9, -3, 18, 6);
+    ctx.fillStyle = activated ? '#c8e6b8' : '#7ea99b';
+    ctx.fillRect(-7, -1, 5, 2);
+    ctx.fillRect(1, -1, 4, 2);
+    ctx.fillStyle = activated ? 'rgba(124, 206, 168, 0.8)' : 'rgba(160, 95, 54, 0.8)';
+    ctx.fillRect(-16, 2, 3, 3);
+    ctx.fillRect(13, 2, 3, 3);
+    ctx.strokeStyle = '#c2a15f';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-15, -8, 30, 17);
+    ctx.fillStyle = '#5a4a30';
+    ctx.fillRect(-20, 8, 40, 3);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(-18, 11, 5, 2);
+    ctx.fillRect(13, 11, 5, 2);
+    ctx.restore();
+  }
+
+  function drawMapWasteland() {
+    mapCtx.clearRect(0, 0, WORLD_W * MAP_TILE, WORLD_H * MAP_TILE);
+    mapCtx.fillStyle = '#0b0806';
+    mapCtx.fillRect(0, 0, WORLD_W * MAP_TILE, WORLD_H * MAP_TILE);
+    for (let y = 0; y < WORLD_H; y += 1) {
+      for (let x = 0; x < WORLD_W; x += 1) {
+        const visited = state.visited.has(key(x, y));
+        const terrain = state.terrain[y][x];
+        const base = terrain === 'asphalt' ? '#2b2520' : terrain === 'concrete' ? '#3b3429' : terrain === 'dry' ? '#46361f' : '#322e20';
+        mapCtx.fillStyle = visited ? base : '#0d0a07';
+        mapCtx.fillRect(x * MAP_TILE, y * MAP_TILE, MAP_TILE + 1, MAP_TILE + 1);
+        if (visited && (x % 4 === 0 || y % 4 === 0)) {
+          mapCtx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+          mapCtx.fillRect(x * MAP_TILE, y * MAP_TILE, 1, MAP_TILE);
+        }
+      }
+    }
+    mapCtx.strokeStyle = 'rgba(122, 92, 60, 0.14)';
+    mapCtx.lineWidth = 1;
+    for (let gx = 0; gx <= WORLD_W; gx += 1) {
+      mapCtx.beginPath();
+      mapCtx.moveTo(gx * MAP_TILE + 0.5, 0);
+      mapCtx.lineTo(gx * MAP_TILE + 0.5, WORLD_H * MAP_TILE);
+      mapCtx.stroke();
+    }
+    for (let gy = 0; gy <= WORLD_H; gy += 1) {
+      mapCtx.beginPath();
+      mapCtx.moveTo(0, gy * MAP_TILE + 0.5);
+      mapCtx.lineTo(WORLD_W * MAP_TILE, gy * MAP_TILE + 0.5);
+      mapCtx.stroke();
+    }
+    state.buildings.forEach((building) => {
+      if (!buildingVisited(building)) return;
+      const style = ZONE_STYLES[building.zone];
+      mapCtx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      mapCtx.fillRect(building.x * MAP_TILE + 2, building.y * MAP_TILE + 2, building.w * MAP_TILE - 2, building.h * MAP_TILE - 2);
+      mapCtx.fillStyle = style.wall;
+      mapCtx.fillRect(building.x * MAP_TILE, building.y * MAP_TILE, building.w * MAP_TILE, building.h * MAP_TILE);
+      mapCtx.fillStyle = style.roof;
+      mapCtx.fillRect(building.x * MAP_TILE + 2, building.y * MAP_TILE + 2, building.w * MAP_TILE - 4, building.h * MAP_TILE - 4);
+      mapCtx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      mapCtx.strokeRect(building.x * MAP_TILE + 2.5, building.y * MAP_TILE + 2.5, building.w * MAP_TILE - 5, building.h * MAP_TILE - 5);
+    });
+    state.safePoints.forEach((safe) => {
+      const px = safe.x * MAP_TILE;
+      const py = safe.y * MAP_TILE;
+      if (safe.active) {
+        mapCtx.fillStyle = safe.power > 0 ? '#e0a25a' : '#b45236';
+        mapCtx.fillRect(px + 2, py + 2, MAP_TILE - 4, MAP_TILE - 4);
+        mapCtx.strokeStyle = safe.power > 0 ? 'rgba(235, 170, 90, 0.5)' : 'rgba(190, 80, 55, 0.4)';
+        mapCtx.strokeRect(px, py, MAP_TILE, MAP_TILE);
+      } else {
+        mapCtx.strokeStyle = '#9d8d70';
+        mapCtx.lineWidth = 1;
+        mapCtx.strokeRect(px + 2.5, py + 2.5, MAP_TILE - 5, MAP_TILE - 5);
+      }
+      mapCtx.fillStyle = safe.active ? '#e6c187' : '#7b6c55';
+      mapCtx.font = '8px Segoe UI, Microsoft YaHei, sans-serif';
+      mapCtx.fillText(safe.name, px + MAP_TILE + 3, py + 9);
+    });
+    const tx = state.terminal.x * MAP_TILE;
+    const ty = state.terminal.y * MAP_TILE;
+    mapCtx.fillStyle = state.terminalActivated ? '#74c6aa' : '#4f6b62';
+    mapCtx.fillRect(tx + 2, ty + 2, MAP_TILE - 4, MAP_TILE - 4);
+    mapCtx.fillStyle = state.terminalActivated ? '#b8dcc2' : '#7f9c92';
+    mapCtx.fillRect(tx + 4, ty + 4, 3, 2);
+    mapCtx.fillStyle = '#9b8d70';
+    mapCtx.font = '8px Segoe UI, Microsoft YaHei, sans-serif';
+    mapCtx.fillText('热灭活终端', tx + MAP_TILE + 3, ty + 9);
+    state.containers.filter((container) => container.type === '补给空投' && containerHasLoot(container) && (state.visited.has(key(container.x, container.y)) || visibleAt(container.x, container.y))).forEach((container) => {
+      mapCtx.fillStyle = '#f0c17a';
+      mapCtx.fillRect(container.x * MAP_TILE + 3, container.y * MAP_TILE + 3, 4, 4);
+      mapCtx.strokeStyle = 'rgba(240, 193, 122, 0.5)';
+      mapCtx.strokeRect(container.x * MAP_TILE, container.y * MAP_TILE, MAP_TILE, MAP_TILE);
+    });
+    const radius = visibilityRadius();
+    mapCtx.strokeStyle = 'rgba(196, 138, 82, 0.45)';
+    mapCtx.lineWidth = 1;
+    mapCtx.strokeRect((state.player.x - radius) * MAP_TILE + 1, (state.player.y - radius) * MAP_TILE + 1, (radius * 2 + 1) * MAP_TILE - 2, (radius * 2 + 1) * MAP_TILE - 2);
+    mapCtx.fillStyle = '#e8ddc3';
+    mapCtx.beginPath();
+    mapCtx.arc((state.player.x + 0.5) * MAP_TILE, (state.player.y + 0.5) * MAP_TILE, 3.5, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.strokeStyle = 'rgba(232, 221, 195, 0.5)';
+    mapCtx.beginPath();
+    mapCtx.arc((state.player.x + 0.5) * MAP_TILE, (state.player.y + 0.5) * MAP_TILE, 6, 0, Math.PI * 2);
+    mapCtx.stroke();
+  }
+
+  /*
+  }
+  */
+
+
+
 
 function drawTerrain(cam) {
   const xStart = Math.max(0, Math.floor(cam.x / TILE) - 1);
@@ -2563,7 +4113,7 @@ function drawZoneLabels(cam) {
   labels.forEach((label) => {
     const point = worldToScreen(label.x, label.y, cam);
     if (point.x < -160 || point.x > canvasState.width + 20 || point.y < -40 || point.y > canvasState.height + 20) return;
-    ctx.fillStyle = 'rgba(230, 235, 224, .32)';
+    ctx.fillStyle = 'rgba(216, 185, 138, 0.38)';
     ctx.font = '600 10px Segoe UI, Microsoft YaHei, sans-serif';
     ctx.fillText(label.text, point.x + 5, point.y + 16);
   });
@@ -2575,7 +4125,7 @@ function drawBuilding(building, cam) {
   const h = building.h * TILE;
   if (point.x > canvasState.width || point.x + w < 0 || point.y > canvasState.height || point.y + h < 0) return;
   const style = ZONE_STYLES[building.zone];
-  const seen = state.visited.has(key(building.x, building.y));
+  const seen = buildingVisited(building);
   if (!seen) {
     ctx.fillStyle = 'rgba(17, 26, 24, .86)';
     ctx.fillRect(point.x, point.y, w, h);
@@ -2642,7 +4192,7 @@ function drawContainers(cam) {
   state.containers.forEach((container) => {
     const airdrop = container.type === '补给空投';
     const point = worldToScreen(container.x + 0.5, container.y + 0.58, cam);
-    if (airdrop && squareDistance(state.player, container) <= 14) {
+    if (airdrop && containerHasLoot(container) && squareDistance(state.player, container) <= 14) {
       // A tall smoke column marks the crate long before its cell is explored.
       const drift = (performance.now() / 700) % 1;
       for (let puff = 0; puff < 3; puff += 1) {
@@ -2810,7 +4360,7 @@ function drawLighting(cam) {
   } else if (phase === '黄昏') {
     ctx.fillStyle = 'rgba(147, 92, 64, .16)'; ctx.fillRect(0, 0, canvasState.width, canvasState.height);
   }
-  state.safePoints.filter((safe) => safe.active && state.visited.has(key(safe.x, safe.y))).forEach((safe) => {
+  state.safePoints.filter((safe) => safe.active && safe.power > 0 && state.visited.has(key(safe.x, safe.y))).forEach((safe) => {
     const point = worldToScreen(safe.x + 0.5, safe.y + 0.5, cam);
     const light = ctx.createRadialGradient(point.x, point.y, 5, point.x, point.y, TILE * 2.2);
     light.addColorStop(0, 'rgba(237, 191, 113, .12)'); light.addColorStop(1, 'rgba(237, 191, 113, 0)');
@@ -2910,13 +4460,13 @@ function updateUI() {
         return `<button class="stash-slot" data-stash-item="${item}" title="取出到背包：${meta.label}×1"><span>${meta.glyph}</span><small>${meta.label}${suffix}</small></button>`;
       }).join('')
       : '<div class="stash-empty">空</div>';
-  const sampleCount = totalSampleCount();
+  const sampleCount = itemCount(state.inventory, 'sample'); // the terminal only counts carried samples
   const safeDone = state.openedSafeCount >= REQUIRED_FRONTLINE_SAFE_POINTS; const sampleDone = sampleCount >= REQUIRED_SAMPLES; const terminalDone = state.terminalActivated;
   ui.safeObjective.classList.toggle('done', safeDone); ui.sampleObjective.classList.toggle('done', sampleDone); ui.terminalObjective.classList.toggle('done', terminalDone);
   ui.safeObjectiveText.textContent = `额外开辟前线安全点 ${Math.min(state.openedSafeCount, REQUIRED_FRONTLINE_SAFE_POINTS)} / ${REQUIRED_FRONTLINE_SAFE_POINTS}`;
-  ui.sampleObjectiveText.textContent = `取得耐热株核心样本 ${Math.min(sampleCount, REQUIRED_SAMPLES)} / ${REQUIRED_SAMPLES}`;
+  ui.sampleObjectiveText.textContent = `随身携带耐热株核心样本 ${Math.min(sampleCount, REQUIRED_SAMPLES)} / ${REQUIRED_SAMPLES}`;
   ui.missionStep.textContent = `${[safeDone, sampleDone, terminalDone].filter(Boolean).length} / 3`;
-  ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `额外修复五个热灭活节点，取得三份耐热株核心样本。当前压力：${state.pressure}。`;
+  ui.missionText.textContent = terminalDone ? '热灭活协议已经覆盖区域。你完成了这次远征。' : `额外修复五个热灭活节点，随身携带三份耐热株核心样本。当前压力：${state.pressure}。`;
   renderRecipes();
   renderFacility();
   updateButtons(); updateLog(); renderLootReveal();
@@ -3075,7 +4625,7 @@ function updateButtons() {
       }
       if (action === 'terminal') enabled = terminalNearby();
       if (recipe) enabled = inSafe && safe.power >= recipe.power && Object.entries(recipe.ingredients).every(([item, amount]) => itemCount(currentStash(), item) >= amount);
-      if (action === 'repair') enabled = inSafe;
+      if (action === 'repair') enabled = inSafe && safe && safe.power < 120;
       if (action === 'rest') enabled = Boolean(activeSafe && activeSafe.power >= sleepPowerCost());
       if (action === 'recenter') enabled = true;
       if (action === 'map') enabled = true;
@@ -3134,8 +4684,8 @@ function updateButtons() {
         if (!inSafe) small.textContent = '需在设施';
         else {
           const missing = Object.entries(REPAIR_COST).filter(([item, amount]) => itemCount(currentStash(), item) < amount);
-          small.textContent = missing.length ? `缺 ${missingGlyphs(REPAIR_COST, currentStash())}` : costGlyphs(REPAIR_COST);
-          button.title = `修复热屏障：${Object.entries(REPAIR_COST).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、')}`;
+          small.textContent = safe.power >= 120 ? '已满功率' : missing.length ? `缺 ${missingGlyphs(REPAIR_COST, currentStash())}` : costGlyphs(REPAIR_COST);
+          button.title = safe.power >= 120 ? '热屏障已满功率，无需维修' : `修复热屏障：${Object.entries(REPAIR_COST).map(([item, amount]) => `${ITEM_META[item]?.label || item}×${amount}`).join('、')}`;
         }
       }
     }
@@ -3209,7 +4759,11 @@ mapCanvas.addEventListener('click', (event) => {
   state.cameraPan.y = (y - state.player.y) * TILE;
   hideTooltip();
   updateUI();
+    closeMap();
 });
+  ui.mapModal.addEventListener('click', (event) => {
+    if (event.target === ui.mapModal) closeMap();
+  });
 ui.inventory.addEventListener('click', (event) => {
   const slot = event.target.closest('[data-inventory-item]');
   if (!slot || state.mode !== 'field') return;
@@ -3277,6 +4831,11 @@ window.addEventListener('keydown', (event) => {
   if (menuOpen) return;
   initAudio();
   if (state.mode !== 'field') return;
+    if (!ui.expeditionModal.classList.contains('hidden')) return;
+    if (state.mapOpen) {
+      if (event.key === 'm' || event.key === 'M') { event.preventDefault(); toggleMap(); }
+      return;
+    }
   // WASD moves the player; arrow keys pan the camera three tiles a press.
   const keyMap = { w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] };
   const panMap = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
@@ -3312,7 +4871,8 @@ function canvasPointFromEvent(event) {
 function handleCanvasTap(pointer) {
   if (state.mode !== 'field') return;
   const point = screenToWorld(pointer.x, pointer.y);
-  const object = objectAtCell(point.x, point.y);
+  const explored = visibleAt(point.x, point.y) || state.visited.has(key(point.x, point.y));
+    const object = explored ? objectAtCell(point.x, point.y) : null;
   if (object?.kind === 'zombie') {
     selectTarget('zombie', object.value);
     return;

@@ -118,7 +118,7 @@ function makeState(overrides = {}) {
     health: 100,
     thirst: 100,
     hunger: 100,
-    buffs: { noiseScale: null, contactShield: 0 },
+    buffs: { noiseScale: null, noiseScaleQueue: [], contactShield: 0 },
     kills: 0,
     lootOpened: 0,
     openedSafeCount: 0,
@@ -1141,5 +1141,108 @@ test('the city map renders the whole world without throwing', () => {
   game.resetGame();
   const state = game.getState();
   state.mapOpen = true;
+  assert.doesNotThrow(() => game.draw());
+});
+
+test('shooting rejects a selected target outside visibility or beyond eight tiles', () => {
+  const game = createGame();
+  const target = { id: 'far', x: 30, y: 5, type: 'common', hp: 52, dead: false, dormant: false, state: 'track', cooldown: 0 };
+  const state = makeState({
+    zombies: [target],
+    inventory: { ammo: 2 },
+    selectedTarget: { kind: 'zombie', id: target.id },
+    player: { x: 5, y: 5, facing: 's' },
+  });
+  game.setState(state);
+  game.shoot();
+  assert.equal(state.inventory.ammo, 2);
+  assert.equal(target.hp, 52);
+});
+
+test('screamer shrieks from its own tile without consuming the player noise buff', () => {
+  const game = createGame();
+  const screamer = { id: 'screamer', x: 6, y: 5, type: 'screamer', hp: 52, dead: false, dormant: false, state: 'track', cooldown: 0 };
+  const state = makeState({ zombies: [screamer], random: () => 0.9, buffs: { noiseScale: 0.45, contactShield: 0 } });
+  game.setState(state);
+  game.updateZombies(new Set());
+  assert.equal(state.buffs.noiseScale, 0.45);
+  const shriek = state.noiseEvents.find((event) => event.intensity === 9 && event.x === screamer.x && event.y === screamer.y);
+  assert.ok(shriek, 'the shriek should be anchored to the screamer');
+});
+
+test('noise remains audible for a third and final player turn', () => {
+  const game = createGame();
+  const listener = { id: 'listener', x: 7, y: 20, type: 'common', hp: 52, dead: false, dormant: false, state: 'wander', cooldown: 0 };
+  const state = makeState({
+    player: { x: 30, y: 20, facing: 's' },
+    zombies: [listener],
+    noiseEvents: [{ x: 0, y: 20, intensity: 20, ttl: 3 }],
+    random: () => 0,
+  });
+  game.setState(state);
+  game.advanceTurns(1, 0);
+  game.advanceTurns(1, 0);
+  game.advanceTurns(1, 0);
+  assert.equal(listener.x, 4); // 7→6, 6→5, and finally 5→4 while ttl=0
+});
+
+test('powered barriers repel zombies even when the player is elsewhere', () => {
+  const game = createGame();
+  const stash = game.emptyStash();
+  const safe = { id: 0, name: '远防站', x: 5, y: 5, active: true, radius: 2, power: 80, level: 2, stash };
+  const zombie = { id: 'intruder', x: 6, y: 5, type: 'common', hp: 52, dead: false, dormant: false, state: 'wander', cooldown: 0 };
+  const state = makeState({ safePoints: [safe], stashes: { 0: stash }, zombies: [zombie], player: { x: 20, y: 20, facing: 's' }, random: () => 0 });
+  game.setState(state);
+  game.updateZombies(new Set());
+  assert.equal(zombie.x, 7);
+  assert.equal(zombie.y, 5);
+});
+
+test('repairing a full-power barrier is rejected without consuming materials', () => {
+  const game = createGame();
+  const stash = game.emptyStash();
+  Object.assign(stash, { metal: 4, filter: 1, battery: 1 });
+  const safe = { id: 0, name: '满电站', x: 5, y: 5, active: true, radius: 3, power: 120, level: 2, stash };
+  const state = makeState({ safePoints: [safe], stashes: { 0: stash } });
+  game.setState(state);
+  game.repairSafePoint();
+  assert.equal(stash.metal, 4);
+  assert.equal(stash.filter, 1);
+  assert.equal(stash.battery, 1);
+});
+
+test('the first hunter is no longer forced to carry the strain', () => {
+  const game = createGame();
+  const state = makeState({ random: () => 0.9 });
+  game.setState(state);
+  assert.equal(game.spawnOne({ night: false, minDistance: 0, allowVisible: true }), true);
+  const first = state.zombies.find((zombie) => zombie.type === 'hunter');
+  assert.ok(first);
+  assert.equal(first.carriesSample, false);
+});
+
+test('successive injections queue their effects instead of overwriting', () => {
+  const game = createGame();
+  const state = makeState({ inventory: { adrenaline: 1, sedative: 1 } });
+  game.setState(state);
+  game.setMenuOpen(false);
+  game.performAction('use-adrenaline');
+  game.performAction('use-sedative');
+  assert.deepEqual(state.buffs.noiseScaleQueue, [0, 0.45]);
+  game.addNoise(18); // first queued injection: completely silent
+  assert.equal(state.noiseEvents.length, 0);
+  game.addNoise(18); // second queued injection: scaled noise
+  assert.equal(state.noiseEvents[0].intensity, 8);
+  assert.deepEqual(state.buffs.noiseScaleQueue, []);
+});
+
+test('wasteland unit, battle-fx and weather rendering does not throw', () => {
+  const game = createGame();
+  game.resetGame();
+  const state = game.getState();
+  state.weatherIndex = 1; // rain
+  state.turn = 53;        // night
+  state.zombies = [{ id: 'visible-zombie', x: 7, y: 23, type: 'screamer', hp: 52, dead: false, dormant: false, state: 'track', cooldown: 0, rx: 7, ry: 23 }];
+  state.fx = [{ type: 'muzzle', x: 7, y: 23, at: performance.now(), life: 460, power: 4, facing: 'e' }];
   assert.doesNotThrow(() => game.draw());
 });

@@ -5,13 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>热区余烬 | 末日搜打撤</title>
     <meta name="description" content="热区余烬：格子制末日搜打撤生存游戏" />
-    <link rel="stylesheet" href="./styles.css?v=expedition-v68" />
+    <link rel="stylesheet" href="./styles-wasteland.css?v=wasteland-v1" />
   </head>
   <body>
+  <div class="wasteland-vignette" aria-hidden="true"></div>
+  <div class="wasteland-grain" aria-hidden="true"></div>
+  <div class="wasteland-scanlines" aria-hidden="true"></div>
     <main class="app-shell">
       <section class="game-column">
         <header class="game-header">
           <div>
+              <svg class="logo-mark" viewBox="0 0 64 64" role="img" aria-label="热区余烬标志">
+                  <defs>
+                    <radialGradient id="emblem-core" cx="50%" cy="46%" r="55%">
+                      <stop offset="0%" stop-color="#f5b066"/>
+                      <stop offset="52%" stop-color="#cf6d2d"/>
+                      <stop offset="100%" stop-color="#5e210e"/>
+                    </radialGradient>
+                  </defs>
+                  <rect x="2" y="2" width="60" height="60" fill="#100b08" stroke="#5a3a22" stroke-width="2"/>
+                  <path d="M2 10 L10 2 H54 L62 10 V54 L54 62 H10 L2 54 Z" fill="none" stroke="#b9662e" stroke-width="2" opacity="0.85"/>
+                  <circle cx="32" cy="32" r="21" fill="#0b0705" stroke="#5c3a22" stroke-width="2"/>
+                  <circle cx="32" cy="32" r="16" fill="none" stroke="#ca7932" stroke-width="2" opacity="0.9"/>
+                  <circle cx="32" cy="32" r="11" fill="url(#emblem-core)"/>
+                  <path d="M32 17 C27 23 25 27 25 32 C25 39 28 44 32 50 C36 44 39 39 39 32 C39 27 37 23 32 17 Z" fill="#e6984c" opacity="0.9"/>
+                  <path d="M32 15 C29 21 27 26 27 31 C27 36 29 41 32 47 C35 41 37 36 37 31 C37 26 35 21 32 15 Z" fill="#ffd08a"/>
+                </svg>
             <p class="eyebrow">HOT ZONE / FIELD OPERATIONS</p>
             <h1>热区余烬</h1>
           </div>
@@ -53,7 +72,7 @@
           <button class="action-button" data-action="wear-selected"><span class="action-glyph">穿</span><span>穿戴</span><small>所选装备</small></button>
           <button class="action-button" data-action="drink"><span class="action-glyph">饮</span><span>饮水</span><small>1回合</small></button>
           <button class="action-button" data-action="eat"><span class="action-glyph">食</span><span>进食</span><small>1回合</small></button>
-          <button class="action-button" data-action="medkit"><span class="action-glyph">疗</span><span>治疗</span><small>即时</small></button>
+          <button class="action-button" data-action="medkit"><span class="action-glyph">疗</span><span>治疗</span><small>1回合</small></button>
           <button class="action-button" data-action="use-adrenaline"><span class="action-glyph">激</span><span>用肾上腺素</span><small>即时</small></button>
           <button class="action-button" data-action="use-sedative"><span class="action-glyph">镇</span><span>用镇静针</span><small>即时</small></button>
           <button class="action-button" data-action="use-coagulant"><span class="action-glyph">凝</span><span>用凝血针</span><small>即时</small></button>
@@ -110,10 +129,10 @@
 
           <section class="mission-panel sidebar-panel" id="panel-mission" role="tabpanel" aria-labelledby="tab-mission" data-sidebar-panel="mission" hidden>
             <div class="panel-heading"><span>主线目标</span><span class="mission-step" id="mission-step">0 / 3</span></div>
-            <p id="mission-text">额外修复五个热灭活节点，取得三份耐热株核心样本。</p>
+            <p id="mission-text">额外修复五个热灭活节点，随身携带三份耐热株核心样本。</p>
             <div class="objective-list">
               <div class="objective" id="objective-safe"><span class="objective-mark"></span><span id="objective-safe-text">额外开辟前线安全点 0 / 5</span></div>
-              <div class="objective" id="objective-sample"><span class="objective-mark"></span><span id="objective-sample-text">取得耐热株核心样本 0 / 3</span></div>
+              <div class="objective" id="objective-sample"><span class="objective-mark"></span><span id="objective-sample-text">随身携带耐热株核心样本 0 / 3</span></div>
               <div class="objective" id="objective-terminal"><span class="objective-mark"></span><span>启动区域热灭活终端</span></div>
             </div>
           </section>
@@ -143,6 +162,31 @@
 
     <div class="modal-layer" id="title-screen">
       <div class="title-card">
+          <svg class="title-logo" viewBox="0 0 240 88" role="img" aria-label="热区余烬标志">
+            <defs>
+              <radialGradient id="title-core" cx="50%" cy="45%" r="55%">
+                <stop offset="0%" stop-color="#f0a65a"/>
+                <stop offset="55%" stop-color="#c96a2c"/>
+                <stop offset="100%" stop-color="#65250f"/>
+              </radialGradient>
+              <linearGradient id="title-metal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#211712"/>
+                <stop offset="100%" stop-color="#0d0907"/>
+              </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="236" height="84" fill="url(#title-metal)" stroke="#51351f" stroke-width="1.5"/>
+            <path d="M2 12 L12 2 H228 L238 12 V76 L228 86 H12 L2 76 Z" fill="none" stroke="#b96a30" stroke-width="2" opacity="0.85"/>
+            <path d="M8 17 L17 8 H223 L232 17 V71 L223 80 H17 L8 71 Z" fill="none" stroke="#2f1d13" stroke-width="1"/>
+            <circle cx="44" cy="44" r="25" fill="#0b0705" stroke="#5c3a22" stroke-width="2"/>
+            <circle cx="44" cy="44" r="19" fill="none" stroke="#c97630" stroke-width="2" opacity="0.85"/>
+            <circle cx="44" cy="44" r="14" fill="url(#title-core)" opacity="0.95"/>
+            <path d="M44 24 C38 31 36 36 36 42 C36 50 40 56 44 63 C48 56 52 50 52 42 C52 36 50 31 44 24 Z" fill="#e8974a" opacity="0.85"/>
+            <path d="M44 22 C41 29 39 35 39 41 C39 47 42 52 44 58 C46 52 49 47 49 41 C49 35 47 29 44 22 Z" fill="#ffcf87" opacity="0.9"/>
+            <text x="80" y="43" fill="#e8d9bd" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="30" font-weight="800" letter-spacing="4">热区余烬</text>
+            <text x="80" y="62" fill="#b28f66" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="9" font-weight="600" letter-spacing="2">HOT ZONE / EMBERS</text>
+            <path d="M18 10 L10 10 L10 18 M222 10 L230 10 L230 18 M230 70 L230 78 L222 78 M10 78 L10 70 L18 70" fill="none" stroke="#8a4a26" stroke-width="2"/>
+            <path d="M8 44 L16 44 M224 44 L232 44 M44 8 L44 16 M44 72 L44 80" fill="none" stroke="#8a4a26" stroke-width="2"/>
+          </svg>
         <p class="eyebrow">HOT ZONE / FIELD OPERATIONS</p>
         <h1 class="title-h1">热区余烬</h1>
         <p class="title-sub">热灭活协议失败了。城市被高温与变异株困住——重启热源网络，把最后三份耐热株核心样本带回终端。</p>
@@ -177,7 +221,7 @@
             <table class="guide-table">
               <tr><th>条件</th><th>要求</th></tr>
               <tr><td>前线安全点</td><td>需额外开辟 <b>5 个</b>，初始隔离站不计入。</td></tr>
-              <tr><td>耐热株核心样本</td><td>需随身携带 <b>3 份</b>。实验室容器中保底生成 2 份，分置于两个不同的箱内；另有 25% 的耐热变异尸携带样本，搜查其尸体必可获得。</td></tr>
+              <tr><td>耐热株核心样本</td><td>需随身携带 <b>3 份</b>。实验室容器中保底生成 2 份，分置于两个不同的箱内；另有约 25% 的耐热变异尸携带样本（首只不保底），搜查其尸体必可获得。</td></tr>
               <tr><td>热灭活终端</td><td>位于地图东侧。启动后远征立即胜利，启动时消耗 3 份样本。</td></tr>
             </table>
           </section>
@@ -186,7 +230,7 @@
             <table class="guide-table">
               <tr><th>操作</th><th>方式</th></tr>
               <tr><td>移动</td><td>使用 WASD 键，或点击相邻格；每移动一格消耗 1 回合。</td></tr>
-              <tr><td>平移视角</td><td>使用方向键、按住拖拽或点击大地图定位；按 M 键或点击"地图"按钮打开大地图。</td></tr>
+              <tr><td>平移视角</td><td>使用方向键、按住拖拽或点击大地图定位；按 M 键或点击"地图"按钮打开大地图，再次点击地图可定位并关闭。</td></tr>
               <tr><td>目标选择</td><td>点击感染体、容器或地面物资以选中；点击尸体将清除当前选择。</td></tr>
               <tr><td>快捷行动</td><td>数字键 1 至 6 依次对应调查、破解、拆解、近战、射击、治疗。</td></tr>
               <tr><td>物品使用</td><td>通过行动条按钮执行（饮水、进食、治疗、针剂）；数字键 6 执行治疗。</td></tr>
@@ -231,7 +275,7 @@
             <table class="guide-table">
               <tr><th>类型</th><th>生命</th><th>接触伤害</th><th>特性</th></tr>
               <tr><td>普通夜行尸</td><td>52</td><td>8</td><td>白天休眠，夜间活动。</td></tr>
-              <tr><td>耐热变异尸</td><td>74</td><td>13</td><td>白天仍然活跃；25% 携带样本。</td></tr>
+              <tr><td>耐热变异尸</td><td>74</td><td>13</td><td>白天仍然活跃；约 25% 携带样本（首只不保底）。</td></tr>
               <tr><td>尖啸尸</td><td>52</td><td>8</td><td>攻击时可能发出尖啸。</td></tr>
               <tr><td>重甲尸</td><td>130</td><td>19</td><td>生命与接触伤害最高。</td></tr>
             </table>
@@ -270,7 +314,7 @@
               <tr><td>开辟</td><td>随身携带金属×6、滤芯×1、电池×1，连续执行 3 回合；离开或跨日则进度清零，材料不返还。</td></tr>
               <tr><td>维修</td><td>消耗该站仓库金属×4、滤芯×1、电池×1，耗时 2 回合，恢复 36 点电力。</td></tr>
               <tr><td>升级</td><td>各站独立：Lv2 屏障半径扩至 3 格；Lv3 自动防卫（每回合灼烧外围感染体 8 点）；Lv4 净水循环（每日为该站仓库增加 2 瓶净水）。</td></tr>
-              <tr><td>清晨回充</td><td>有电站点每日恢复 8×等级 % 的电力（如 Lv2 恢复 16%）；断电后需手动维修。</td></tr>
+              <tr><td>清晨回充</td><td>有电站点每日恢复 8 + 8×等级 % 的电力（如 Lv2 恢复 24%）；断电后需手动维修。</td></tr>
               <tr><td>睡眠</td><td>需在有电安全点内执行；电力成本为 6 加已开辟站点数；恢复 12 点生命。</td></tr>
               <tr><td>空投</td><td>第 3 天起、且已开辟至少 1 个前线站后开始投送；野外过夜奖励必含装备。</td></tr>
             </table>
@@ -289,7 +333,7 @@
           <button class="primary-button map-close-button" id="map-close">关闭地图</button>
         </div>
         <canvas id="map-canvas" aria-label="城市地图"></canvas>
-        <div class="map-foot">点击地图移动视角 · 未探索区域保持黑暗 · M 键或"地图"按钮开关</div>
+        <div class="map-foot">点击地图定位并关闭 · 未探索区域保持黑暗 · M 键或"地图"按钮开关</div>
       </div>
     </div>
 
